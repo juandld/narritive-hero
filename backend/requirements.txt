@@ -1,0 +1,9 @@
+langchain
+sounddevice
+soundfile
+numpy
+fastapi
+uvicorn[standard]
+python-multipart
+langchain-google-genai
+python-dotenv

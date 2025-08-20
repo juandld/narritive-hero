@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./voice_notes:/app/voice_notes
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
