@@ -60,12 +60,14 @@ async def generate_title(prompt: str, llm_instance) -> str:
     print(f"Generated title: {title}")
     return title
 
-async def transcribe_and_save(wav_path: str):
+async def transcribe_and_save(audio_path: str, mime_type: str):
     """Transcribes a single audio file and saves the transcription."""
-    txt_path = wav_path.replace('.wav', '.txt')
-    print(f"Transcribing {os.path.basename(wav_path)}...")
+    base_filename, _ = os.path.splitext(audio_path)
+    txt_path = f"{base_filename}.txt"
+    title_path = f"{base_filename}.title"
+    print(f"Transcribing {os.path.basename(audio_path)}...")
 
-    with open(wav_path, "rb") as audio_file:
+    with open(audio_path, "rb") as audio_file:
         audio_bytes = audio_file.read()
 
     encoded_audio = base64.b64encode(audio_bytes).decode('utf-8')
@@ -80,7 +82,7 @@ async def transcribe_and_save(wav_path: str):
             },
             {
                 "type": "media",
-                "mime_type": "audio/wav",
+                "mime_type": mime_type,
                 "data": encoded_audio,
             },
         ]
@@ -91,23 +93,27 @@ async def transcribe_and_save(wav_path: str):
 
     with open(txt_path, 'w') as f:
         f.write(transcription)
-    print(f"Finished transcribing {os.path.basename(wav_path)}.")
+    print(f"Finished transcribing {os.path.basename(audio_path)}.")
 
     # Generate and save title
     try:
         title_prompt = f"Generate a concise title (under 10 words) for the following audio transcription:\n\n{transcription}"
 
         title = await generate_title(title_prompt, llm)
-        title_path = wav_path.replace('.wav', '.title')
         with open(title_path, 'w') as f:
             f.write(title)
     except Exception as e:
-        print(f"Error generating title for {os.path.basename(wav_path)}: {e}")
-        title_path = wav_path.replace('.wav', '.title')
+        print(f"Error generating title for {os.path.basename(audio_path)}: {e}")
         with open(title_path, 'w') as f:
             f.write("Title generation failed.")
 
 
+
+
+import mimetypes
+
+# --- Constants ---
+SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
 
 # --- API Endpoints ---
 @app.on_event("startup")
@@ -117,17 +123,28 @@ async def on_startup():
         os.makedirs(VOICE_NOTES_DIR)
     
     print("Checking for missing transcriptions...")
-    wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')}
-    txt_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.txt')}
-    title_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.title')}
+    
+    # Get all files in the voice notes directory
+    all_files = set(os.listdir(VOICE_NOTES_DIR))
+    
+    # Separate audio, txt, and title files
+    audio_files = {f for f in all_files if os.path.splitext(f)[1] in SUPPORTED_AUDIO_EXTENSIONS}
+    txt_files = {f for f in all_files if f.endswith('.txt')}
+    title_files = {f for f in all_files if f.endswith('.title')}
 
     tasks = []
-    for wav_file in wav_files:
-        txt_filename = wav_file.replace('.wav', '.txt')
-        title_filename = wav_file.replace('.wav', '.title')
+    for audio_file in audio_files:
+        base_filename, _ = os.path.splitext(audio_file)
+        txt_filename = f"{base_filename}.txt"
+        title_filename = f"{base_filename}.title"
+        
+        audio_path = os.path.join(VOICE_NOTES_DIR, audio_file)
+        
+        # Check if transcription or title is missing
         if txt_filename not in txt_files or title_filename not in title_files:
-            wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
-            tasks.append(transcribe_and_save(wav_path))
+            mime_type, _ = mimetypes.guess_type(audio_path)
+            if mime_type:
+                tasks.append(transcribe_and_save(audio_path, mime_type))
         else:
             # Check if the transcription failed
             transcription_path = os.path.join(VOICE_NOTES_DIR, txt_filename)
@@ -135,8 +152,9 @@ async def on_startup():
                 with open(transcription_path, 'r') as f:
                     transcription = f.read()
                 if transcription == "Transcription failed.":
-                    wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
-                    tasks.append(transcribe_and_save(wav_path))
+                    mime_type, _ = mimetypes.guess_type(audio_path)
+                    if mime_type:
+                        tasks.append(transcribe_and_save(audio_path, mime_type))
             
             # Check if title generation failed
             title_path = os.path.join(VOICE_NOTES_DIR, title_filename)
@@ -144,8 +162,9 @@ async def on_startup():
                 with open(title_path, 'r') as f:
                     title_content = f.read()
                 if title_content == "Title generation failed.":
-                    wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
-                    tasks.append(transcribe_and_save(wav_path))
+                    mime_type, _ = mimetypes.guess_type(audio_path)
+                    if mime_type:
+                        tasks.append(transcribe_and_save(audio_path, mime_type))
 
     if tasks:
         print(f"Found {len(tasks)} notes to transcribe/title.")
@@ -163,15 +182,16 @@ async def on_startup():
 def get_notes():
     """Returns a list of notes with their transcriptions."""
     notes = []
-    wav_files = sorted(
-        [f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')],
+    audio_files = sorted(
+        [f for f in os.listdir(VOICE_NOTES_DIR) if os.path.splitext(f)[1] in SUPPORTED_AUDIO_EXTENSIONS],
         key=lambda f: os.path.getmtime(os.path.join(VOICE_NOTES_DIR, f)),
         reverse=True
     )
 
-    for wav_file in wav_files:
-        transcription_path = os.path.join(VOICE_NOTES_DIR, wav_file.replace('.wav', '.txt'))
-        title_path = os.path.join(VOICE_NOTES_DIR, wav_file.replace('.wav', '.title'))
+    for audio_file in audio_files:
+        base_filename, _ = os.path.splitext(audio_file)
+        transcription_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.txt")
+        title_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.title")
         
         transcription = "Transcription in progress..."
         if os.path.exists(transcription_path):
@@ -183,7 +203,7 @@ def get_notes():
             with open(title_path, 'r') as f:
                 title = f.read()
 
-        notes.append(Note(filename=wav_file, transcription=transcription, title=title))
+        notes.append(Note(filename=audio_file, transcription=transcription, title=title))
     return notes
 
 @app.post("/api/notes")
@@ -191,6 +211,11 @@ async def create_note(file: UploadFile = File(...), date: Optional[str] = None, 
     """Receives an audio file, saves it, and triggers transcription."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
+    # Get the file extension from the original filename
+    _, file_extension = os.path.splitext(file.filename)
+    if not file_extension or file_extension.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Supported types are: {', '.join(SUPPORTED_AUDIO_EXTENSIONS)}")
+
     filename_parts = [timestamp]
     if date:
         filename_parts.append(date.replace(" ", "_").replace("/", "_"))
@@ -198,37 +223,40 @@ async def create_note(file: UploadFile = File(...), date: Optional[str] = None, 
         filename_parts.append(place.replace(" ", "_").replace("/", "_"))
 
     filename_base = "_".join(filename_parts)
-    filename_wav = f"note_{filename_base}.wav"
+    filename_audio = f"note_{filename_base}{file_extension}"
     
-    wav_path = os.path.join(VOICE_NOTES_DIR, filename_wav)
+    audio_path = os.path.join(VOICE_NOTES_DIR, filename_audio)
 
     # Save the uploaded audio file
     try:
-        with open(wav_path, "wb") as buffer:
+        with open(audio_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     finally:
         file.file.close()
 
     # Transcribe the audio and save it
     try:
-        await transcribe_and_save(wav_path)
+        # Get the mime type from the uploaded file
+        mime_type = file.content_type
+        await transcribe_and_save(audio_path, mime_type)
     except Exception as e:
         if "429" in str(e):
             raise HTTPException(status_code=429, detail="You have exceeded your Google API quota. Please upgrade your plan.")
         else:
             raise HTTPException(status_code=500, detail=f"An error occurred during transcription: {e}")
 
-    return {"filename": filename_wav}
+    return {"filename": filename_audio}
 
 @app.delete("/api/notes/{filename}")
 def delete_note(filename: str):
     """Deletes a note and its associated files."""
-    wav_path = os.path.join(VOICE_NOTES_DIR, filename)
-    txt_path = os.path.join(VOICE_NOTES_DIR, filename.replace('.wav', '.txt'))
-    title_path = os.path.join(VOICE_NOTES_DIR, filename.replace('.wav', '.title'))
+    audio_path = os.path.join(VOICE_NOTES_DIR, filename)
+    base_filename, _ = os.path.splitext(filename)
+    txt_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.txt")
+    title_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.title")
 
     deleted = False
-    for path in [wav_path, txt_path, title_path]:
+    for path in [audio_path, txt_path, title_path]:
         if os.path.exists(path):
             os.remove(path)
             deleted = True
