@@ -1,5 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Toast from '../lib/components/Toast.svelte';
+  import RecordingControls from '../lib/components/RecordingControls.svelte';
+  import PlacePrompt from '../lib/components/PlacePrompt.svelte';
+  import NotesList from '../lib/components/NotesList.svelte';
+  import FileUpload from '../lib/components/FileUpload.svelte';
 
   type Note = {
     filename: string;
@@ -15,7 +20,6 @@
   let toastMessage = '';
   let showToast = false;
 
-  let subject: string = '';
   let includeDate: boolean = true;
   let includePlace: boolean = false;
   let detectedPlace: string = '';
@@ -30,15 +34,6 @@
       expandedNotes.add(filename);
     }
     expandedNotes = new Set(expandedNotes); // Fix: Trigger Svelte reactivity
-  }
-
-  function getDisplayedTranscription(transcription: string | undefined, filename: string): string {
-    if (!transcription) return '';
-    if (expandedNotes.has(filename)) {
-      return transcription;
-    } else {
-      return ''; // No preview by default
-    }
   }
 
   function getLocation(): Promise<string> {
@@ -100,7 +95,10 @@
           showPlacePrompt = true;
         } catch (error) {
           console.error(error);
-          toastMessage = typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : 'An error occurred';
+          toastMessage =
+            typeof error === 'object' && error !== null && 'message' in error
+              ? String((error as { message: unknown }).message)
+              : 'An error occurred';
           showToast = true;
           setTimeout(() => {
             showToast = false;
@@ -110,7 +108,7 @@
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorder = new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = event => {
+      mediaRecorder.ondataavailable = (event) => {
         audioChunks.push(event.data);
       };
       mediaRecorder.onstop = async () => {
@@ -177,69 +175,42 @@
       console.error('Error deleting file:', error);
     }
   }
+
+  function handlePlacePromptResponse(event: CustomEvent<boolean>) {
+    includePlace = event.detail;
+    showPlacePrompt = false;
+  }
+
+  async function handleFileSelected(event: CustomEvent<File>) {
+    const file = event.detail;
+    await uploadRecording(file);
+  }
 </script>
 
 <main style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem;">
-  {#if showToast}
-    <div style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: #333; color: white; padding: 1rem 2rem; border-radius: 8px; z-index: 1000; transition: opacity 0.5s ease;">
-      {toastMessage}
-    </div>
-  {/if}
+  <Toast message={toastMessage} show={showToast} />
 
   <h1 style="text-align: center;">Narrative Hero</h1>
 
-  <div style="margin-bottom: 2rem; text-align: center;">
-    <div style="margin-bottom: 1rem; display: flex; align-items: center; justify-content: center;">
-      <input type="checkbox" bind:checked={includeDate} id="includeDate" style="margin-right: 10px;">
-      <label for="includeDate">Include Date</label>
-    </div>
-    <div style="margin-bottom: 1rem; display: flex; align-items: center; justify-content: center;">
-      <input type="checkbox" bind:checked={includePlace} id="includePlace" style="margin-right: 10px;">
-      <label for="includePlace">Include Place</label>
-    </div>
-    {#if isRecording}
-      <button on:click={stopRecording} style="background-color: #db4437; color: white; padding: 1rem 2rem; border: none; border-radius: 5px; font-size: 1rem; cursor: pointer;">
-        Stop Recording
-      </button>
-    {:else}
-      <button on:click={startRecording} style="background-color: #4285f4; color: white; padding: 1rem 2rem; border: none; border-radius: 5px; font-size: 1rem; cursor: pointer;">
-        Start Recording
-      </button>
-    {/if}
-  </div>
+  <FileUpload on:file-selected={handleFileSelected} />
+
+  <RecordingControls
+    bind:isRecording
+    bind:includeDate
+    bind:includePlace
+    {startRecording}
+    {stopRecording}
+  />
 
   {#if showPlacePrompt}
-    <div style="margin-top: 1rem; padding: 1rem; background-color: #e6f7ff; border: 1px solid #91d5ff; border-radius: 8px; text-align: center;">
-      <p>Detected your location: {detectedPlace}. Do you want to add this to the note?</p>
-      <button on:click={() => { includePlace = true; showPlacePrompt = false; }} style="background-color: #52c41a; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Yes</button>
-      <button on:click={() => { includePlace = false; showPlacePrompt = false; }} style="background-color: #f5222d; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer;">No</button>
-    </div>
+    <PlacePrompt {detectedPlace} on:response={handlePlacePromptResponse} />
   {/if}
 
-  <h2>Saved Notes</h2>
-  {#if notes.length > 0}
-    <ul style="list-style: none; padding: 0;">
-      {#each notes as note}
-        <li style="margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px;">
-          {#if note.title}
-            <p><strong>Title:</strong> {note.title}</p>
-          {/if}
-          <audio controls src="{`${BACKEND_URL}/voice_notes/${note.filename}`}" style="width: 100%; margin-bottom: 0.5rem;"></audio>
-          <blockquote style="background-color: white; padding: 0.5rem 1rem; border-left: 5px solid #4285f4; margin: 0;">
-            <p>{getDisplayedTranscription(note.transcription, note.filename)}</p>
-            {#if note.transcription && note.transcription.length > 0}
-              <button on:click={() => toggleExpand(note.filename)} style="background: none; border: none; color: #4285f4; cursor: pointer; font-size: 0.9em; transform: rotate({expandedNotes.has(note.filename) ? '180deg' : '0deg'});">
-                {expandedNotes.has(note.filename) ? '\u25B2' : '\u25BC'}
-              </button>
-            {/if}
-          </blockquote>
-          <button on:click={() => copyToClipboard(note.transcription)} style="background-color: #4285f4; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px;">Copy TS</button>
-          <button on:click={() => deleteNote(note.filename)} style="background-color: #db4437; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; margin-left: 10px;">Delete</button>
-        </li>
-      {/each}
-    </ul>
-  {:else}
-    <p>No notes found. Record one above!</p>
-  {/if}
+  <NotesList
+    {notes}
+    {expandedNotes}
+    on:toggle={(e) => toggleExpand(e.detail)}
+    on:copy={(e) => copyToClipboard(e.detail)}
+    on:delete={(e) => deleteNote(e.detail)}
+  />
 </main>
-
