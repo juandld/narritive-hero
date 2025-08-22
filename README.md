@@ -1,26 +1,103 @@
 # Narrative Hero
 
-A project that uses Python and LangChain to generate narratives.
+Narrative Hero is a web application that allows users to record voice notes and generate narratives from them using Google's Gemini AI.
 
-## Setup
+## Features
 
-1. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   ```
+*   **Voice Note Recording:** Easily record and save voice notes directly in the browser.
+*   **Narrative Generation:** Uses LangChain and Google's Gemini AI to generate stories and narratives based on the recorded voice notes.
+*   **Web-based Interface:** A user-friendly interface built with SvelteKit for managing notes and generated content.
 
-2. Activate the virtual environment:
-   ```bash
-   source venv/bin/activate
-   ```
+## Tech Stack
 
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+*   **Frontend:** SvelteKit, TypeScript
+*   **Backend:** Python, FastAPI, LangChain, Google Gemini
+*   **Containerization:** Docker, Docker Compose
 
-## Running the project
+## Prerequisites
 
-```bash
-python main.py
-```
+*   Docker and Docker Compose (for containerized deployment)
+*   Node.js and npm (for local frontend development)
+*   Python 3.8+ and pip (for local backend development)
+*   A Google AI API Key
+
+## Running the Project
+
+### Production (using Docker)
+
+This is the recommended way to run the project.
+
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd narrative-hero
+    ```
+
+2.  **Create a `.env` file:**
+    Create a `.env` file in the `backend` directory and add your Google AI API key:
+    ```
+    GOOGLE_API_KEY="your-api-key"
+    ```
+
+3.  **Build and run the application with Docker Compose:**
+    ```bash
+    docker-compose up --build
+    ```
+
+4.  **Access the application:**
+    The frontend will be available at `http://localhost:5173`.
+
+### Local Development
+
+For development, you can run the frontend and backend services separately.
+
+#### Backend
+
+1.  **Navigate to the backend directory:**
+    ```bash
+    cd backend
+    ```
+
+2.  **Create a virtual environment and install dependencies:**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    ```
+
+3.  **Create a `.env` file:**
+    Create a `.env` file in the `backend` directory and add your Google AI API key:
+    ```
+    GOOGLE_API_KEY="your-api-key"
+    ```
+
+4.  **Run the backend server:**
+    ```bash
+    uvicorn main:app --reload
+    ```
+    The backend API will be available at `http://localhost:8000`.
+
+#### Frontend
+
+1.  **Navigate to the frontend directory:**
+    ```bash
+    cd frontend
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+3.  **Run the frontend development server:**
+    ```bash
+    npm run dev
+    ```
+    The frontend will be available at `http://localhost:5173`.
+
+## Project Structure
+
+*   `frontend/`: Contains the SvelteKit frontend application.
+*   `backend/`: Contains the Python FastAPI backend, including the logic for audio processing and narrative generation.
+*   `voice_notes/`: Directory where the recorded voice notes are stored.
+*   `compose.yaml`: Defines the services, networks, and volumes for Docker Compose.
