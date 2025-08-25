@@ -5,6 +5,7 @@
   import PlacePrompt from '../lib/components/PlacePrompt.svelte';
   import NotesList from '../lib/components/NotesList.svelte';
   import FileUpload from '../lib/components/FileUpload.svelte';
+  import NarrativesDrawer from '../lib/components/NarrativesDrawer.svelte';
 
   type Note = {
     filename: string;
@@ -19,6 +20,8 @@
   let expandedNotes: Set<string> = new Set();
   let toastMessage = '';
   let showToast = false;
+
+  let isNarrativesDrawerOpen = false;
 
   let includeDate: boolean = true;
   let includePlace: boolean = false;
@@ -192,7 +195,10 @@
 
   <h1 style="text-align: center;">Narrative Hero</h1>
 
-  <FileUpload on:file-selected={handleFileSelected} />
+  <div class="controls-container">
+    <FileUpload on:file-selected={handleFileSelected} />
+    <button class="narrative-button" on:click={() => (isNarrativesDrawerOpen = true)}>View Narratives</button>
+  </div>
 
   <RecordingControls
     bind:isRecording
@@ -214,3 +220,30 @@
     on:delete={(e) => deleteNote(e.detail)}
   />
 </main>
+
+<NarrativesDrawer isOpen={isNarrativesDrawerOpen} onClose={() => (isNarrativesDrawerOpen = false)} />
+
+<style>
+  main {
+    font-family: sans-serif;
+    max-width: 600px;
+    margin: auto;
+    padding: 2rem;
+  }
+
+  .controls-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .narrative-button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+</style>

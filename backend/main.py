@@ -112,3 +112,33 @@ def delete_note(filename: str):
         raise HTTPException(status_code=404, detail="Note not found")
 
     return {"message": "Note deleted successfully"}
+
+@app.get("/api/narratives")
+def get_narratives():
+    """Returns a list of narrative files."""
+    narratives_dir = os.path.join(APP_DIR, "narratives")
+    if not os.path.exists(narratives_dir):
+        return []
+    return sorted(
+        [f for f in os.listdir(narratives_dir) if f.endswith('.txt')],
+        key=lambda f: os.path.getmtime(os.path.join(narratives_dir, f)),
+        reverse=True
+    )
+
+@app.get("/api/narratives/{filename}")
+def get_narrative_content(filename: str):
+    """Returns the content of a narrative file."""
+    narrative_path = os.path.join(APP_DIR, "narratives", filename)
+    if not os.path.exists(narrative_path):
+        raise HTTPException(status_code=404, detail="Narrative not found")
+    with open(narrative_path, 'r') as f:
+        return {"content": f.read()}
+
+@app.delete("/api/narratives/{filename}")
+def delete_narrative(filename: str):
+    """Deletes a narrative file."""
+    narrative_path = os.path.join(APP_DIR, "narratives", filename)
+    if not os.path.exists(narrative_path):
+        raise HTTPException(status_code=404, detail="Narrative not found")
+    os.remove(narrative_path)
+    return {"message": "Narrative deleted successfully"}

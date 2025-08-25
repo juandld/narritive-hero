@@ -5,6 +5,9 @@ Narrative Hero is a web application that allows users to record voice notes and 
 ## Features
 
 *   **Voice Note Recording:** Easily record and save voice notes directly in the browser.
+*   **File Upload:** Upload existing audio files for processing.
+*   **Date and Location Tagging:** Optionally tag notes with the current date and your geographical location.
+*   **Automatic Transcription and Titling:** Each note is automatically transcribed and given a descriptive title.
 *   **Narrative Generation:** Uses LangChain and Google's Gemini AI to generate stories and narratives based on the recorded voice notes.
 *   **Web-based Interface:** A user-friendly interface built with SvelteKit for managing notes and generated content.
 
@@ -45,7 +48,7 @@ This is the recommended way to run the project.
     ```
 
 4.  **Access the application:**
-    The frontend will be available at `http://localhost:5173`.
+    The frontend will be available at `http://localhost`.
 
 ### Local Development
 
@@ -97,7 +100,8 @@ For development, you can run the frontend and backend services separately.
 
 ## Project Structure
 
-*   `frontend/`: Contains the SvelteKit frontend application.
+*   `frontend/`: Contains the SvelteKit frontend application. The UI is built with a component-based architecture, including components for file uploads, note display, and recording controls.
 *   `backend/`: Contains the Python FastAPI backend, including the logic for audio processing and narrative generation.
 *   `voice_notes/`: Directory where the recorded voice notes are stored.
+*   `narratives/`: Directory where the generated narratives are stored.
 *   `compose.yaml`: Defines the services, networks, and volumes for Docker Compose.
