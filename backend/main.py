@@ -8,7 +8,7 @@ from typing import List, Optional
 import dotenv
 
 from models import Note
-from services import transcribe_and_save
+from services import transcribe_and_save, generate_narrative, llm
 from utils import on_startup
 
 # Load environment variables from .env file
@@ -112,6 +112,38 @@ def delete_note(filename: str):
         raise HTTPException(status_code=404, detail="Note not found")
 
     return {"message": "Note deleted successfully"}
+
+@app.post("/api/narratives")
+async def create_narrative(notes: List[Note]):
+    """Creates a narrative from a list of notes."""
+    transcriptions = []
+    for note in notes:
+        transcription_path = os.path.join(VOICE_NOTES_DIR, note.filename.replace('.wav', '.txt'))
+        if os.path.exists(transcription_path):
+            with open(transcription_path, 'r') as f:
+                transcriptions.append(f.read())
+    
+    if not transcriptions:
+        raise HTTPException(status_code=400, detail="No transcriptions found for the selected notes.")
+
+    combined_transcription = "\n\n".join(transcriptions)
+    
+    try:
+        narrative_prompt = f"Based on the following transcriptions, write a short, compelling narrative or story. The narrative should be engaging and well-structured, drawing inspiration from the key themes, emotions, and events in the text. Be creative and elaborate on the provided information to create a captivating story.\n\nTranscriptions:\n{combined_transcription}"
+        narrative = await generate_narrative(narrative_prompt, llm)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        narrative_filename = f"narrative_{timestamp}.txt"
+        narratives_dir = os.path.join(APP_DIR, "narratives")
+        os.makedirs(narratives_dir, exist_ok=True)
+        narrative_path = os.path.join(narratives_dir, narrative_filename)
+        
+        with open(narrative_path, 'w') as f:
+            f.write(narrative)
+            
+        return {"filename": narrative_filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during narrative generation: {e}")
 
 @app.get("/api/narratives")
 def get_narratives():

@@ -7,12 +7,11 @@
     title?: string;
   };
   export let expanded: boolean;
+  export let selected: boolean;
 
   const dispatch = createEventDispatcher();
 
   const BACKEND_URL = 'http://localhost:8000';
-
-  
 
   function toggleExpand() {
     dispatch('toggle');
@@ -25,9 +24,14 @@
   function deleteNote() {
     dispatch('delete');
   }
+
+  function onSelect() {
+    dispatch('select', { filename: note.filename, selected: !selected });
+  }
 </script>
 
 <li style="margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px;">
+  <input type="checkbox" checked={selected} on:change={onSelect} />
   {#if note.title}
     <p><strong>Title:</strong> {note.title}</p>
   {/if}

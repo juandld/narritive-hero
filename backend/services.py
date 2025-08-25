@@ -72,19 +72,6 @@ async def transcribe_and_save(wav_path: str):
         with open(title_path, 'w') as f:
             f.write("Title generation failed.")
 
-    # Generate and save narrative
-    try:
-        narrative_prompt = f"Based on the following transcription, write a short, compelling narrative or story. The narrative should be engaging and well-structured, drawing inspiration from the key themes, emotions, and events in the text. Be creative and elaborate on the provided information to create a captivating story.\n\nTranscription:\n{transcription}"
-        narrative = await generate_narrative(narrative_prompt, llm)
-        narrative_filename = os.path.basename(wav_path).replace('.wav', '.txt')
-        narratives_dir = os.path.join(os.path.dirname(wav_path), "..", "narratives")
-        os.makedirs(narratives_dir, exist_ok=True)
-        narrative_path = os.path.join(narratives_dir, narrative_filename)
-        with open(narrative_path, 'w') as f:
-            f.write(narrative)
-    except Exception as e:
-        print(f"Error generating narrative for {os.path.basename(wav_path)}: {e}")
-
 async def generate_narrative(prompt: str, llm_instance) -> str:
     """Generates a narrative from the given prompt."""
     print("Generating narrative...")
