@@ -71,3 +71,19 @@ async def transcribe_and_save(wav_path: str):
         title_path = wav_path.replace('.wav', '.title')
         with open(title_path, 'w') as f:
             f.write("Title generation failed.")
+
+async def generate_narrative(prompt: str, llm_instance) -> str:
+    """Generates a narrative from the given prompt."""
+    print("Generating narrative...")
+    message = HumanMessage(
+        content=[
+            {
+                "type": "text",
+                "text": prompt,
+            }
+        ]
+    )
+    response = await llm_instance.ainvoke([message])
+    narrative = response.content.strip()
+    print(f"Generated narrative: {narrative}")
+    return narrative

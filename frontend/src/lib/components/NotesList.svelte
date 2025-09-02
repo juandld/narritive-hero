@@ -4,6 +4,7 @@
 
   export let notes: any[];
   export let expandedNotes: Set<string>;
+  export let selectedNotes: Set<string>;
 
   const dispatch = createEventDispatcher();
 
@@ -18,6 +19,10 @@
   function deleteNote(filename: string) {
     dispatch('delete', filename);
   }
+
+  function selectNote(event: CustomEvent<{ filename: string; selected: boolean }>) {
+    dispatch('select', event.detail);
+  }
 </script>
 
 <h2>Saved Notes</h2>
@@ -27,9 +32,11 @@
       <NoteItem
         {note}
         expanded={expandedNotes.has(note.filename)}
+        selected={selectedNotes.has(note.filename)}
         on:toggle={() => toggleExpand(note.filename)}
         on:copy={() => copyToClipboard(note.transcription)}
         on:delete={() => deleteNote(note.filename)}
+        on:select={selectNote}
       />
     {/each}
   </ul>
