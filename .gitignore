@@ -27,3 +27,8 @@ Thumbs.db
 # Exclude all contents of voice_notes folder, but keep the folder
 voice_notes/*
 !voice_notes/.gitkeep
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
