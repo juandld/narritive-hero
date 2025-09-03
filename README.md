@@ -74,9 +74,9 @@ For development, you can run the frontend and backend services separately.
     GOOGLE_API_KEY="your-api-key"
     ```
 
-4.  **Run the backend server:**
+4.  **Run the backend development server:**
     ```bash
-    uvicorn main:app --reload
+    ./dev.sh
     ```
     The backend API will be available at `http://localhost:8000`.
 
