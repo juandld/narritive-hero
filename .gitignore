@@ -1,5 +1,6 @@
 # Node modules
 node_modules/
+package-lock.json
 
 # Build output
 dist/
@@ -32,3 +33,9 @@ voice_notes/*
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Python virtual env files
+venv/
+
+# svelte build files
+frontend/.svelte-kit/
