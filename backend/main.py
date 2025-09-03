@@ -13,21 +13,25 @@ from utils import on_startup
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
-
 # --- FastAPI App Setup ---
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-VOICE_NOTES_DIR = os.path.join(APP_DIR, "voice_notes")
+
+# Allow overriding with environment variables, fallback to backend/voice_notes
+VOICE_NOTES_DIR = os.getenv("VOICE_NOTES_DIR", os.path.join(APP_DIR, "voice_notes"))
+NARRATIVES_DIR = os.getenv("NARRATIVES_DIR", os.path.join(APP_DIR, "narratives"))
+
 app = FastAPI()
 
 # --- Middleware ---
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"], 
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 
 # --- API Endpoints ---
 @app.on_event("startup")
