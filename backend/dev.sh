@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
+
+# Exit on error
+set -e
+
+# Check if venv exists, if not create it and install dependencies
+if [ ! -d "venv" ]; then
+    echo "Creating virtual environment..."
+    python -m venv venv
+    echo "Virtual environment created."
+    
+    echo "Installing dependencies..."
+    source venv/bin/activate
+    pip install -r requirements.txt
+    echo "Dependencies installed."
+else
+    # Activate existing venv
+    source venv/bin/activate
+fi
+
 set -a
 # Load env variables from backend/.env if exists
 source .env 2>/dev/null || true
 set +a
-
-# Activate venv
-source venv/bin/activate
 
 # Figure out project root (one level up from backend/)
 PROJECT_ROOT="$(dirname "$(pwd)")"

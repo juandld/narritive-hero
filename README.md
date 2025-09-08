@@ -61,24 +61,17 @@ For development, you can run the frontend and backend services separately.
     cd backend
     ```
 
-2.  **Create a virtual environment and install dependencies:**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-    ```
-
-3.  **Create a `.env` file:**
+2.  **Create a `.env` file:**
     Create a `.env` file in the `backend` directory and add your Google AI API key:
     ```
     GOOGLE_API_KEY="your-api-key"
     ```
 
-4.  **Run the backend development server:**
+3.  **Run the development script:**
     ```bash
     ./dev.sh
     ```
-    The backend API will be available at `http://localhost:8000`.
+    This script will automatically create a virtual environment, install dependencies if needed, and start the backend server at `http://localhost:8000`.
 
 #### Frontend
 
