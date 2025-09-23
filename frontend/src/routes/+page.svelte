@@ -11,17 +11,22 @@
     filename: string;
     transcription?: string;
     title?: string;
+    date?: string; // YYYY-MM-DD
+    length_seconds?: number;
+    topics?: string[];
   };
 
   let isRecording = false;
   let mediaRecorder: MediaRecorder | null = null;
   let audioChunks: Blob[] = [];
   let notes: Note[] = [];
+  let filteredNotes: Note[] = [];
   let expandedNotes: Set<string> = new Set();
   let selectedNotes: Set<string> = new Set();
   let toastMessage = '';
   let showToast = false;
   let isUploading = false;
+  let isBulkDeleting = false;
 
   let isNarrativesDrawerOpen = false;
 
@@ -31,6 +36,66 @@
   let showPlacePrompt: boolean = false;
 
   const BACKEND_URL = 'http://localhost:8000';
+
+  // Filters
+  let filterDateFrom: string = '';
+  let filterDateTo: string = '';
+  let filterTopics: string = '';
+  let filterMinLen: number | '' = '';
+  let filterMaxLen: number | '' = '';
+  let filterSearch: string = '';
+
+  function applyFilters() {
+    const from = filterDateFrom ? new Date(filterDateFrom) : null;
+    const to = filterDateTo ? new Date(filterDateTo) : null;
+    const topicTokens = filterTopics
+      .toLowerCase()
+      .split(/[ ,]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const minLen = typeof filterMinLen === 'number' ? filterMinLen : null;
+    const maxLen = typeof filterMaxLen === 'number' ? filterMaxLen : null;
+    const q = filterSearch.trim().toLowerCase();
+
+    filteredNotes = notes.filter((n) => {
+      // Date filter
+      if (from || to) {
+        if (!n.date) return false;
+        const d = new Date(n.date);
+        if (from && d < from) return false;
+        if (to) {
+          const end = new Date(to);
+          end.setHours(23, 59, 59, 999);
+          if (d > end) return false;
+        }
+      }
+      // Topics filter (any match)
+      if (topicTokens.length) {
+        const noteTopics = (n.topics || []).map((t) => t.toLowerCase());
+        const hasAny = topicTokens.some((t) => noteTopics.includes(t));
+        if (!hasAny) return false;
+      }
+      // Length filter
+      if (minLen !== null && (n.length_seconds ?? 0) < minLen) return false;
+      if (maxLen !== null && (n.length_seconds ?? 0) > maxLen) return false;
+      // Text search across title + transcription
+      if (q) {
+        const hay = `${n.title ?? ''} ${n.transcription ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function resetFilters() {
+    filterDateFrom = '';
+    filterDateTo = '';
+    filterTopics = '';
+    filterMinLen = '';
+    filterMaxLen = '';
+    filterSearch = '';
+    applyFilters();
+  }
 
   function toggleExpand(filename: string) {
     if (expandedNotes.has(filename)) {
@@ -111,6 +176,7 @@
       const response = await fetch(`${BACKEND_URL}/api/notes`);
       if (response.ok) {
         notes = await response.json();
+        applyFilters();
       } else {
         console.error('Failed to fetch notes:', response.statusText);
       }
@@ -256,6 +322,44 @@
     }
   }
 
+  async function deleteSelectedNotes() {
+    if (selectedNotes.size === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${selectedNotes.size} selected note(s)? This removes audio, transcription, and title files.`
+    );
+    if (!confirmed) return;
+    isBulkDeleting = true;
+    try {
+      const filenames = Array.from(selectedNotes);
+      const results = await Promise.allSettled(
+        filenames.map((filename) =>
+          fetch(`${BACKEND_URL}/api/notes/${filename}`, { method: 'DELETE' })
+        )
+      );
+      const successCount = results.filter(
+        (r) => r.status === 'fulfilled' && (r as PromiseFulfilledResult<Response>).value.ok
+      ).length;
+      const failCount = results.length - successCount;
+      await getNotes();
+      selectedNotes.clear();
+      selectedNotes = new Set(selectedNotes);
+      toastMessage = `Deleted ${successCount} note(s)` + (failCount ? `, ${failCount} failed` : '');
+      showToast = true;
+      setTimeout(() => {
+        showToast = false;
+      }, 3000);
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      toastMessage = 'Failed to delete selected notes.';
+      showToast = true;
+      setTimeout(() => {
+        showToast = false;
+      }, 3000);
+    } finally {
+      isBulkDeleting = false;
+    }
+  }
+
   function handlePlacePromptResponse(event: CustomEvent<boolean>) {
     includePlace = event.detail;
     showPlacePrompt = false;
@@ -293,8 +397,39 @@
     <div class="loading-indicator">Processing your note, please wait...</div>
   {/if}
 
+  <div class="filters">
+    <div class="field">
+      <label for="filter-date-from">Date from</label>
+      <input id="filter-date-from" type="date" bind:value={filterDateFrom} on:change={applyFilters} />
+    </div>
+    <div class="field">
+      <label for="filter-date-to">Date to</label>
+      <input id="filter-date-to" type="date" bind:value={filterDateTo} on:change={applyFilters} />
+    </div>
+    <div class="field">
+      <label for="filter-topics">Topics</label>
+      <input id="filter-topics" placeholder="e.g. meeting, travel" bind:value={filterTopics} on:input={applyFilters} />
+    </div>
+    <div class="field">
+      <label for="filter-min">Min sec</label>
+      <input id="filter-min" type="number" min="0" bind:value={filterMinLen} on:input={applyFilters} />
+    </div>
+    <div class="field">
+      <label for="filter-max">Max sec</label>
+      <input id="filter-max" type="number" min="0" bind:value={filterMaxLen} on:input={applyFilters} />
+    </div>
+    <div class="field search">
+      <label for="filter-search">Search</label>
+      <input id="filter-search" placeholder="search title or text" bind:value={filterSearch} on:input={applyFilters} />
+    </div>
+    <div class="actions">
+      <button type="button" class="reset-button" on:click={resetFilters}>Reset Filters</button>
+      <div class="results-info">{filteredNotes.length} of {notes.length}</div>
+    </div>
+  </div>
+
   <NotesList
-    {notes}
+    notes={filteredNotes}
     {expandedNotes}
     {selectedNotes}
     on:toggle={(e) => toggleExpand(e.detail)}
@@ -304,9 +439,14 @@
   />
 
   {#if selectedNotes.size > 0}
-    <button class="create-narrative-button" on:click={createNarrative}>
-      Create Narrative from {selectedNotes.size} note(s)
-    </button>
+    <div class="bulk-actions">
+      <button class="action-button delete" disabled={isBulkDeleting} on:click={deleteSelectedNotes}>
+        {isBulkDeleting ? 'Deleting…' : `Delete ${selectedNotes.size} selected`}
+      </button>
+      <button class="action-button create" on:click={createNarrative}>
+        Create Narrative from {selectedNotes.size} note(s)
+      </button>
+    </div>
   {/if}
 </main>
 
@@ -336,19 +476,33 @@
     cursor: pointer;
   }
 
-  .create-narrative-button {
+  .bulk-actions {
     position: fixed;
     bottom: 2rem;
     left: 50%;
     transform: translateX(-50%);
-    background-color: #28a745;
-    color: white;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    z-index: 10;
+  }
+
+  .action-button {
     border: none;
-    padding: 1rem 2rem;
+    padding: 1rem 1.5rem;
     border-radius: 50px;
     cursor: pointer;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    color: white;
+  }
+
+  .action-button.create {
+    background-color: #28a745;
+  }
+
+  .action-button.delete {
+    background-color: #db4437;
   }
 
   .loading-indicator {
@@ -358,4 +512,41 @@
     border-radius: 5px;
     text-align: center;
   }
+
+  .filters {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem 0.75rem;
+    margin-bottom: 1rem;
+    align-items: end;
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    padding: 0.75rem;
+    border-radius: 8px;
+  }
+  .filters .field label {
+    display: block;
+    font-size: 0.8rem;
+    color: #555;
+  }
+  .filters .actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .reset-button {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .results-info {
+    font-size: 0.85rem;
+    color: #666;
+  }
+
+  /* Removed standalone delete-selected-button styles in favor of .bulk-actions */
 </style>

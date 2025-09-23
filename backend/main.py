@@ -16,6 +16,7 @@ from fastapi import FastAPI, File, UploadFile, Form, Response, Request, Backgrou
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from services import process_interaction, get_notes, transcribe_and_save
+from models import TagsUpdate
 from utils import on_startup
 import uvicorn
 import os
@@ -34,6 +35,7 @@ app.add_middleware(
 
 # Mount static files directory for voice notes
 VOICE_NOTES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'voice_notes'))
+TRANSCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'transcriptions'))
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 
 @app.on_event("startup")
@@ -87,15 +89,38 @@ async def delete_note(filename: str):
         
         # Delete associated files
         base_filename = filename.replace('.wav', '')
-        txt_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.txt")
-        title_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.title")
-        if os.path.exists(txt_path):
-            os.remove(txt_path)
-        if os.path.exists(title_path):
-            os.remove(title_path)
+        json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
+        legacy_txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        if os.path.exists(legacy_txt_path):
+            os.remove(legacy_txt_path)
             
         return Response(status_code=200)
     return Response(status_code=404)
+
+@app.patch("/api/notes/{filename}/tags")
+async def update_tags(filename: str, payload: TagsUpdate):
+    """Update user-defined tags for a note (stored in JSON)."""
+    base_filename = filename.replace('.wav', '')
+    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
+    # Ensure a JSON exists
+    if not os.path.exists(json_path):
+        return Response(status_code=404)
+    try:
+        import json
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        # Normalize tags into list of {label, color}
+        tags = []
+        for t in payload.tags:
+            tags.append({"label": t.label, "color": t.color})
+        data["tags"] = tags
+        with open(json_path, 'w') as f:
+            json.dump(data, f, ensure_ascii=False)
+        return {"status": "ok", "tags": tags}
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

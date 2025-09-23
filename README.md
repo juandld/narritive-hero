@@ -96,5 +96,7 @@ For development, you can run the frontend and backend services separately.
 *   `frontend/`: Contains the SvelteKit frontend application. The UI is built with a component-based architecture, including components for file uploads, note display, and recording controls.
 *   `backend/`: Contains the Python FastAPI backend, including the logic for audio processing and narrative generation.
 *   `voice_notes/`: Directory where the recorded voice notes are stored.
+*   `transcriptions/`: Directory where note metadata is stored as JSON (`.json`) per audio file. Each JSON contains `title` and `transcription` (and may include other fields).
+*   Legacy `.title` and `.txt` files are automatically consolidated into JSON on startup; no separate `titles/` is used anymore.
 *   `narratives/`: Directory where the generated narratives are stored.
 *   `compose.yaml`: Defines the services, networks, and volumes for Docker Compose.
