@@ -13,6 +13,9 @@ from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders.parsers.audio import OpenAIWhisperParser
 from base64 import b64encode
 from typing import List, Optional, Tuple
+import config
+import providers
+import note_store
 import usage_log as usage
 
 # Load environment variables from .env file
@@ -268,24 +271,24 @@ async def transcribe_and_save(wav_path):
             )
             # Use sync path without internal async retries; run in a thread
             transcription_response, key_index = await asyncio.to_thread(
-                _invoke_google, [transcription_message]
+                providers.invoke_google, [transcription_message]
             )
             transcribed_text = transcription_response.content
             usage.log_usage(
                 event="transcribe",
                 provider="gemini",
-                model=GOOGLE_MODEL,
-                key_label=usage.key_label_from_index(key_index, GOOGLE_KEYS),
+                model=config.GOOGLE_MODEL,
+                key_label=providers.key_label_from_index(key_index),
                 status="success",
             )
         except Exception as gerr:
-            if _should_google_fallback(gerr):
+            if providers.should_google_fallback(gerr):
                 # Fallback to OpenAI Whisper
-                transcribed_text = _transcribe_with_openai(audio_bytes, file_ext="wav")
+                transcribed_text = providers.transcribe_with_openai(audio_bytes, file_ext="wav")
                 usage.log_usage(
                     event="transcribe",
                     provider="openai",
-                    model=OPENAI_TRANSCRIBE_MODEL,
+                    model=config.OPENAI_TRANSCRIBE_MODEL,
                     key_label=usage.OPENAI_LABEL,
                     status="success",
                 )
@@ -303,23 +306,23 @@ async def transcribe_and_save(wav_path):
             )
             # Use sync path without internal async retries; run in a thread
             title_response, key_index = await asyncio.to_thread(
-                _invoke_google, [title_message]
+                providers.invoke_google, [title_message]
             )
             title_text = title_response.content.strip().replace('"', '')
             usage.log_usage(
                 event="title",
                 provider="gemini",
-                model=GOOGLE_MODEL,
-                key_label=usage.key_label_from_index(key_index, GOOGLE_KEYS),
+                model=config.GOOGLE_MODEL,
+                key_label=providers.key_label_from_index(key_index),
                 status="success",
             )
         except Exception as gerr:
-            if _should_google_fallback(gerr):
-                title_text = _title_with_openai(transcribed_text)
+            if providers.should_google_fallback(gerr):
+                title_text = providers.title_with_openai(transcribed_text)
                 usage.log_usage(
                     event="title",
                     provider="openai",
-                    model=OPENAI_TITLE_MODEL,
+                    model=config.OPENAI_TITLE_MODEL,
                     key_label=usage.OPENAI_LABEL,
                     status="success",
                 )
@@ -327,48 +330,17 @@ async def transcribe_and_save(wav_path):
                 raise gerr
         print(f"Successfully generated title for {base_filename}.")
 
-        # Save combined JSON (title + transcription + metadata)
-        os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
-        json_filename = base_filename.replace('.wav', '.json')
-        json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
-        # metadata
-        mtime = os.path.getmtime(wav_path)
-        date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-        length_sec = _audio_length_seconds(wav_path)
-        topics = _infer_topics(transcribed_text, title_text)
-        payload = {
-            "filename": base_filename + ".wav",
-            "title": title_text,
-            "transcription": transcribed_text,
-            "date": date_str,
-            "length_seconds": length_sec,
-            "topics": topics,
-            "tags": [],
-        }
-        with open(json_path, 'w') as jf:
-            json.dump(payload, jf, ensure_ascii=False)
+        base_no_ext = base_filename[:-4] if base_filename.endswith('.wav') else base_filename
+        payload = note_store.build_note_payload(base_no_ext, title_text, transcribed_text)
+        note_store.save_note_json(base_no_ext, payload)
         print(f"Successfully saved transcription and title for {base_filename}.")
 
     except Exception as e:
         print(f"Error during transcription/titling for {wav_path}: {e}")
-        # Save combined JSON error to prevent re-processing
-        os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
-        json_filename = base_filename.replace('.wav', '.json')
-        json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
-        mtime = os.path.getmtime(wav_path) if os.path.exists(wav_path) else None
-        date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d') if mtime else None
-        length_sec = _audio_length_seconds(wav_path) if os.path.exists(wav_path) else None
-        payload = {
-            "filename": base_filename + ".wav",
-            "title": "Title generation failed.",
-            "transcription": "Transcription failed.",
-            "date": date_str,
-            "length_seconds": length_sec,
-            "topics": [],
-            "tags": [],
-        }
-        with open(json_path, 'w') as jf:
-            json.dump(payload, jf, ensure_ascii=False)
+        if os.path.exists(wav_path):
+            base_no_ext = base_filename[:-4] if base_filename.endswith('.wav') else base_filename
+            payload = note_store.build_note_payload(base_no_ext, "Title generation failed.", "Transcription failed.")
+            note_store.save_note_json(base_no_ext, payload)
 
 def _audio_length_seconds(path: str) -> float | None:
     try:
@@ -405,67 +377,31 @@ def get_notes():
         return notes
 
     # Ensure transcripts dir exists (in case)
-    os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+    os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
 
     wav_files = [f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')]
     wav_files.sort(key=lambda f: os.path.getmtime(os.path.join(VOICE_NOTES_DIR, f)), reverse=True)
     for filename in wav_files:
         base_filename = filename[:-4]
-        audio_path = os.path.join(VOICE_NOTES_DIR, filename)
-        json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
-        transcription = None
-        title = None
-        if os.path.exists(json_path):
-            try:
-                with open(json_path, 'r') as jf:
-                    data = json.load(jf)
-                transcription = data.get("transcription")
-                title = data.get("title")
-                # Ensure metadata fields exist; backfill if missing
-                audio_path = os.path.join(VOICE_NOTES_DIR, filename)
-                meta_updated = False
-                if "date" not in data or not data.get("date"):
-                    mtime = os.path.getmtime(audio_path)
-                    data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-                    meta_updated = True
-                if "length_seconds" not in data or data.get("length_seconds") is None:
-                    data["length_seconds"] = _audio_length_seconds(audio_path)
-                    meta_updated = True
-                if "topics" not in data or not isinstance(data.get("topics"), list):
-                    data["topics"] = _infer_topics(transcription, title)
-                    meta_updated = True
-                if "tags" not in data or not isinstance(data.get("tags"), list):
-                    data["tags"] = []
-                    meta_updated = True
-                if meta_updated:
-                    try:
-                        with open(json_path, 'w') as jf:
-                            json.dump(data, jf, ensure_ascii=False)
-                    except Exception:
-                        pass
-            except Exception:
-                transcription = None
-                title = None
-        else:
-            # Backward compatibility: read legacy transcription if present
-            txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
+        data, transcription, title = note_store.load_note_json(base_filename)
+        if data is None:
+            # Backward compatibility: legacy .txt
+            txt_path = os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.txt")
             if os.path.exists(txt_path):
                 with open(txt_path, 'r') as f:
                     transcription = f.read()
-
-        # metadata
-        mtime = os.path.getmtime(audio_path)
-        date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-        length_sec = _audio_length_seconds(audio_path)
-        topics = _infer_topics(transcription, title)
+            data = note_store.build_note_payload(base_filename, title or "", transcription or "")
+            note_store.save_note_json(base_filename, data)
+        else:
+            data = note_store.ensure_metadata_in_json(base_filename, data)
 
         notes.append({
             "filename": filename,
             "transcription": transcription,
             "title": title,
-            "date": date_str,
-            "length_seconds": length_sec,
-            "topics": topics,
-            "tags": data.get("tags", []) if 'data' in locals() and isinstance(data, dict) else [],
+            "date": data.get("date"),
+            "length_seconds": data.get("length_seconds"),
+            "topics": data.get("topics", []),
+            "tags": data.get("tags", []),
         })
     return notes

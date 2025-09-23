@@ -14,7 +14,7 @@
 
   const dispatch = createEventDispatcher();
 
-  const BACKEND_URL = 'http://localhost:8000';
+  import { BACKEND_URL } from '../config';
 
   // Tag editing state
   let newTagLabel: string = '';
@@ -115,7 +115,7 @@
     {#if showPalette}
       <div style="position:absolute; right:64px; bottom:40px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px; display:flex; gap:6px; box-shadow:0 10px 20px rgba(0,0,0,0.08);">
         {#each TAG_COLORS as c}
-          <button type="button" title={c.label} on:click={() => selectColor(c.value)}
+          <button type="button" title={c.label} aria-label={c.label} on:click={() => selectColor(c.value)}
             style="width:22px; height:22px; border-radius:50%; border:2px solid {newTagColor===c.value ? '#111' : '#fff'}; background:{c.value}; cursor:pointer;">
           </button>
         {/each}

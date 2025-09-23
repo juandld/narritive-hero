@@ -36,6 +36,7 @@ app.add_middleware(
 # Mount static files directory for voice notes
 VOICE_NOTES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'voice_notes'))
 TRANSCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'transcriptions'))
+NARRATIVES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'narratives'))
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 
 @app.on_event("startup")
@@ -119,6 +120,72 @@ async def update_tags(filename: str, payload: TagsUpdate):
         with open(json_path, 'w') as f:
             json.dump(data, f, ensure_ascii=False)
         return {"status": "ok", "tags": tags}
+    except Exception as e:
+        return {"error": str(e)}
+
+# ----------------- Narratives API -----------------
+
+@app.get("/api/narratives")
+async def list_narratives():
+    if not os.path.exists(NARRATIVES_DIR):
+        os.makedirs(NARRATIVES_DIR)
+    files = [f for f in sorted(os.listdir(NARRATIVES_DIR)) if f.endswith('.txt')]
+    return files
+
+@app.get("/api/narratives/{filename}")
+async def get_narrative(filename: str):
+    path = os.path.join(NARRATIVES_DIR, filename)
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            content = f.read()
+        return {"content": content}
+    return Response(status_code=404)
+
+@app.delete("/api/narratives/{filename}")
+async def delete_narrative(filename: str):
+    path = os.path.join(NARRATIVES_DIR, filename)
+    if os.path.exists(path):
+        os.remove(path)
+        return Response(status_code=200)
+    return Response(status_code=404)
+
+@app.post("/api/narratives")
+async def create_narrative_from_notes(request: Request):
+    """Create a simple narrative by concatenating selected notes' titles and transcriptions.
+
+    Expects JSON body: [{"filename": "...wav"}, ...]
+    Writes a .txt file into narratives/ and returns its filename.
+    """
+    try:
+        items = await request.json()
+        if not isinstance(items, list):
+            return Response(status_code=400)
+        parts = []
+        for it in items:
+            wav = (it or {}).get('filename')
+            if not wav or not wav.endswith('.wav'):
+                continue
+            base = wav[:-4]
+            json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
+            title = base
+            text = ''
+            if os.path.exists(json_path):
+                import json
+                with open(json_path, 'r') as jf:
+                    data = json.load(jf)
+                title = data.get('title') or title
+                text = data.get('transcription') or ''
+            parts.append(f"# {title}\n\n{text}\n\n")
+        if not parts:
+            return Response(status_code=400)
+        if not os.path.exists(NARRATIVES_DIR):
+            os.makedirs(NARRATIVES_DIR)
+        from datetime import datetime
+        name = f"narrative-{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        out = os.path.join(NARRATIVES_DIR, name)
+        with open(out, 'w') as f:
+            f.write("\n".join(parts))
+        return {"filename": name}
     except Exception as e:
         return {"error": str(e)}
 

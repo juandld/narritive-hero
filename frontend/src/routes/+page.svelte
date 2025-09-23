@@ -35,27 +35,24 @@
   let detectedPlace: string = '';
   let showPlacePrompt: boolean = false;
 
-  const BACKEND_URL = 'http://localhost:8000';
+  import { BACKEND_URL } from '../lib/config';
 
-  // Filters
-  let filterDateFrom: string = '';
-  let filterDateTo: string = '';
-  let filterTopics: string = '';
-  let filterMinLen: number | '' = '';
-  let filterMaxLen: number | '' = '';
-  let filterSearch: string = '';
+  // Filters moved to FiltersBar component
+  import FiltersBar, { type Filters } from '../lib/components/FiltersBar.svelte';
+  import BulkActions from '../lib/components/BulkActions.svelte';
+  let filters: Filters = { dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '' };
 
   function applyFilters() {
-    const from = filterDateFrom ? new Date(filterDateFrom) : null;
-    const to = filterDateTo ? new Date(filterDateTo) : null;
-    const topicTokens = filterTopics
+    const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
+    const to = filters.dateTo ? new Date(filters.dateTo) : null;
+    const topicTokens = filters.topics
       .toLowerCase()
       .split(/[ ,]+/)
       .map((t) => t.trim())
       .filter(Boolean);
-    const minLen = typeof filterMinLen === 'number' ? filterMinLen : null;
-    const maxLen = typeof filterMaxLen === 'number' ? filterMaxLen : null;
-    const q = filterSearch.trim().toLowerCase();
+    const minLen = typeof filters.minLen === 'number' ? filters.minLen : null;
+    const maxLen = typeof filters.maxLen === 'number' ? filters.maxLen : null;
+    const q = filters.search.trim().toLowerCase();
 
     filteredNotes = notes.filter((n) => {
       // Date filter
@@ -87,15 +84,7 @@
     });
   }
 
-  function resetFilters() {
-    filterDateFrom = '';
-    filterDateTo = '';
-    filterTopics = '';
-    filterMinLen = '';
-    filterMaxLen = '';
-    filterSearch = '';
-    applyFilters();
-  }
+  // Reset handled by FiltersBar
 
   function toggleExpand(filename: string) {
     if (expandedNotes.has(filename)) {
@@ -397,36 +386,8 @@
     <div class="loading-indicator">Processing your note, please wait...</div>
   {/if}
 
-  <div class="filters">
-    <div class="field">
-      <label for="filter-date-from">Date from</label>
-      <input id="filter-date-from" type="date" bind:value={filterDateFrom} on:change={applyFilters} />
-    </div>
-    <div class="field">
-      <label for="filter-date-to">Date to</label>
-      <input id="filter-date-to" type="date" bind:value={filterDateTo} on:change={applyFilters} />
-    </div>
-    <div class="field">
-      <label for="filter-topics">Topics</label>
-      <input id="filter-topics" placeholder="e.g. meeting, travel" bind:value={filterTopics} on:input={applyFilters} />
-    </div>
-    <div class="field">
-      <label for="filter-min">Min sec</label>
-      <input id="filter-min" type="number" min="0" bind:value={filterMinLen} on:input={applyFilters} />
-    </div>
-    <div class="field">
-      <label for="filter-max">Max sec</label>
-      <input id="filter-max" type="number" min="0" bind:value={filterMaxLen} on:input={applyFilters} />
-    </div>
-    <div class="field search">
-      <label for="filter-search">Search</label>
-      <input id="filter-search" placeholder="search title or text" bind:value={filterSearch} on:input={applyFilters} />
-    </div>
-    <div class="actions">
-      <button type="button" class="reset-button" on:click={resetFilters}>Reset Filters</button>
-      <div class="results-info">{filteredNotes.length} of {notes.length}</div>
-    </div>
-  </div>
+  <FiltersBar bind:filters on:change={(e) => { filters = e.detail; applyFilters(); }} counts={{ total: notes.length, filtered: filteredNotes.length }} />
+  <!-- legacy filters markup removed -->
 
   <NotesList
     notes={filteredNotes}
@@ -438,16 +399,7 @@
     on:select={handleSelectNote}
   />
 
-  {#if selectedNotes.size > 0}
-    <div class="bulk-actions">
-      <button class="action-button delete" disabled={isBulkDeleting} on:click={deleteSelectedNotes}>
-        {isBulkDeleting ? 'Deleting…' : `Delete ${selectedNotes.size} selected`}
-      </button>
-      <button class="action-button create" on:click={createNarrative}>
-        Create Narrative from {selectedNotes.size} note(s)
-      </button>
-    </div>
-  {/if}
+  <BulkActions selectedCount={selectedNotes.size} {isBulkDeleting} on:deleteSelected={deleteSelectedNotes} on:createNarrative={createNarrative} />
 </main>
 
 <NarrativesDrawer isOpen={isNarrativesDrawerOpen} onClose={() => (isNarrativesDrawerOpen = false)} />
@@ -476,35 +428,6 @@
     cursor: pointer;
   }
 
-  .bulk-actions {
-    position: fixed;
-    bottom: 2rem;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-    z-index: 10;
-  }
-
-  .action-button {
-    border: none;
-    padding: 1rem 1.5rem;
-    border-radius: 50px;
-    cursor: pointer;
-    font-size: 1.1rem;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    color: white;
-  }
-
-  .action-button.create {
-    background-color: #28a745;
-  }
-
-  .action-button.delete {
-    background-color: #db4437;
-  }
-
   .loading-indicator {
     background-color: #f0f0f0;
     padding: 1rem;
@@ -513,40 +436,5 @@
     text-align: center;
   }
 
-  .filters {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 0.75rem 0.75rem;
-    margin-bottom: 1rem;
-    align-items: end;
-    background: #f8f9fa;
-    border: 1px solid #e5e7eb;
-    padding: 0.75rem;
-    border-radius: 8px;
-  }
-  .filters .field label {
-    display: block;
-    font-size: 0.8rem;
-    color: #555;
-  }
-  .filters .actions {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .reset-button {
-    background: #6c757d;
-    color: white;
-    border: none;
-    padding: 0.5rem 0.9rem;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .results-info {
-    font-size: 0.85rem;
-    color: #666;
-  }
-
-  /* Removed standalone delete-selected-button styles in favor of .bulk-actions */
+  /* Filters moved to FiltersBar component */
 </style>
