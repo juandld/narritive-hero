@@ -1,9 +1,7 @@
-langchain
-sounddevice
-soundfile
-numpy
 fastapi
-uvicorn[standard]
+uvicorn
 python-multipart
 langchain-google-genai
+langchain-core
 python-dotenv
+pillow
