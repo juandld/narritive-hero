@@ -1,180 +1,101 @@
-import os
-import shutil
-from datetime import datetime
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import logging
+
+# Silence verbose loggers
+logging.basicConfig(level=logging.INFO)
+loggers_to_silence = [
+    "google.generativeai",
+    "langchain",
+    "langchain_core",
+    "langchain_google_genai",
+]
+for logger_name in loggers_to_silence:
+    # Use ERROR to reduce noisy quota retry warnings
+    logging.getLogger(logger_name).setLevel(logging.ERROR)
+
+from fastapi import FastAPI, File, UploadFile, Form, Response, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from typing import List, Optional
-import dotenv
-
-from models import Note
-from services import transcribe_and_save, generate_narrative, llm
+from services import process_interaction, get_notes, transcribe_and_save
 from utils import on_startup
-
-# Load environment variables from .env file
-dotenv.load_dotenv()
-# --- FastAPI App Setup ---
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Allow overriding with environment variables, fallback to backend/voice_notes
-VOICE_NOTES_DIR = os.getenv("VOICE_NOTES_DIR", os.path.join(APP_DIR, "voice_notes"))
-NARRATIVES_DIR = os.getenv("NARRATIVES_DIR", os.path.join(APP_DIR, "narratives"))
+import uvicorn
+import os
+from datetime import datetime
 
 app = FastAPI()
 
-# --- Middleware ---
-app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
+# Configure CORS to allow requests from the SvelteKit frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173"],  # The default SvelteKit dev server address
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Mount static files directory for voice notes
+VOICE_NOTES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'voice_notes'))
+app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 
-# --- API Endpoints ---
 @app.on_event("startup")
 async def startup_event():
     await on_startup()
 
-@app.get("/api/notes", response_model=List[Note])
-def get_notes():
-    """Returns a list of notes with their transcriptions."""
-    notes = []
-    wav_files = sorted(
-        [f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')],
-        key=lambda f: os.path.getmtime(os.path.join(VOICE_NOTES_DIR, f)),
-        reverse=True
-    )
+@app.post("/narrative/interaction")
+async def handle_interaction(
+    audio_file: UploadFile = File(...), 
+    current_scenario_id: str = Form(...)
+):
+    """
+    This endpoint receives audio and the current scenario ID,
+    processes them, and returns the next scenario.
+    """
+    result = process_interaction(audio_file.file, current_scenario_id)
+    return result
 
-    for wav_file in wav_files:
-        transcription_path = os.path.join(VOICE_NOTES_DIR, wav_file.replace('.wav', '.txt'))
-        title_path = os.path.join(VOICE_NOTES_DIR, wav_file.replace('.wav', '.title'))
-        
-        transcription = "Transcription in progress..."
-        if os.path.exists(transcription_path):
-            with open(transcription_path, 'r') as f:
-                transcription = f.read()
-        
-        title = "Title generation in progress..."
-        if os.path.exists(title_path):
-            with open(title_path, 'r') as f:
-                title = f.read()
-
-        notes.append(Note(filename=wav_file, transcription=transcription, title=title))
-    return notes
+@app.get("/api/notes")
+async def read_notes():
+    """API endpoint to retrieve all notes."""
+    return get_notes()
 
 @app.post("/api/notes")
-async def create_note(file: UploadFile = File(...), date: Optional[str] = None, place: Optional[str] = None):
-    """Receives an audio file, saves it, and triggers transcription."""
+async def create_note(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    date: str = Form(None),
+    place: str = Form(None)
+):
+    """API endpoint to upload a new note."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{timestamp}.wav"
+    file_path = os.path.join(VOICE_NOTES_DIR, filename)
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(file.file.read())
     
-    filename_parts = [timestamp]
-    if date:
-        filename_parts.append(date.replace(" ", "_").replace("/", "_"))
-    if place:
-        filename_parts.append(place.replace(" ", "_").replace("/", "_"))
-
-    filename_base = "_".join(filename_parts)
-    filename_wav = f"note_{filename_base}.wav"
+    # Start transcription and title generation in the background
+    print(f"File saved: {filename}. Adding transcription to background tasks.")
+    background_tasks.add_task(transcribe_and_save, file_path)
     
-    wav_path = os.path.join(VOICE_NOTES_DIR, filename_wav)
-
-    # Save the uploaded audio file
-    try:
-        with open(wav_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    finally:
-        file.file.close()
-
-    # Transcribe the audio and save it
-    try:
-        await transcribe_and_save(wav_path)
-    except Exception as e:
-        if "429" in str(e):
-            raise HTTPException(status_code=429, detail="You have exceeded your Google API quota. Please upgrade your plan.")
-        else:
-            raise HTTPException(status_code=500, detail=f"An error occurred during transcription: {e}")
-
-    return {"filename": filename_wav}
+    return {"filename": filename, "message": "File upload successful, transcription started."}
 
 @app.delete("/api/notes/{filename}")
-def delete_note(filename: str):
-    """Deletes a note and its associated files."""
-    wav_path = os.path.join(VOICE_NOTES_DIR, filename)
-    txt_path = os.path.join(VOICE_NOTES_DIR, filename.replace('.wav', '.txt'))
-    title_path = os.path.join(VOICE_NOTES_DIR, filename.replace('.wav', '.title'))
-
-    deleted = False
-    for path in [wav_path, txt_path, title_path]:
-        if os.path.exists(path):
-            os.remove(path)
-            deleted = True
-
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Note not found")
-
-    return {"message": "Note deleted successfully"}
-
-@app.post("/api/narratives")
-async def create_narrative(notes: List[Note]):
-    """Creates a narrative from a list of notes."""
-    transcriptions = []
-    for note in notes:
-        transcription_path = os.path.join(VOICE_NOTES_DIR, note.filename.replace('.wav', '.txt'))
-        if os.path.exists(transcription_path):
-            with open(transcription_path, 'r') as f:
-                transcriptions.append(f.read())
-    
-    if not transcriptions:
-        raise HTTPException(status_code=400, detail="No transcriptions found for the selected notes.")
-
-    combined_transcription = "\n\n".join(transcriptions)
-    
-    try:
-        narrative_prompt = f"Based on the following transcriptions, write a short, compelling narrative or story. The narrative should be engaging and well-structured, drawing inspiration from the key themes, emotions, and events in the text. Be creative and elaborate on the provided information to create a captivating story.\n\nTranscriptions:\n{combined_transcription}"
-        narrative = await generate_narrative(narrative_prompt, llm)
+async def delete_note(filename: str):
+    """API endpoint to delete a note."""
+    file_path = os.path.join(VOICE_NOTES_DIR, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        narrative_filename = f"narrative_{timestamp}.txt"
-        narratives_dir = os.path.join(APP_DIR, "narratives")
-        os.makedirs(narratives_dir, exist_ok=True)
-        narrative_path = os.path.join(narratives_dir, narrative_filename)
-        
-        with open(narrative_path, 'w') as f:
-            f.write(narrative)
+        # Delete associated files
+        base_filename = filename.replace('.wav', '')
+        txt_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.txt")
+        title_path = os.path.join(VOICE_NOTES_DIR, f"{base_filename}.title")
+        if os.path.exists(txt_path):
+            os.remove(txt_path)
+        if os.path.exists(title_path):
+            os.remove(title_path)
             
-        return {"filename": narrative_filename}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred during narrative generation: {e}")
+        return Response(status_code=200)
+    return Response(status_code=404)
 
-@app.get("/api/narratives")
-def get_narratives():
-    """Returns a list of narrative files."""
-    narratives_dir = os.path.join(APP_DIR, "narratives")
-    if not os.path.exists(narratives_dir):
-        return []
-    return sorted(
-        [f for f in os.listdir(narratives_dir) if f.endswith('.txt')],
-        key=lambda f: os.path.getmtime(os.path.join(narratives_dir, f)),
-        reverse=True
-    )
-
-@app.get("/api/narratives/{filename}")
-def get_narrative_content(filename: str):
-    """Returns the content of a narrative file."""
-    narrative_path = os.path.join(APP_DIR, "narratives", filename)
-    if not os.path.exists(narrative_path):
-        raise HTTPException(status_code=404, detail="Narrative not found")
-    with open(narrative_path, 'r') as f:
-        return {"content": f.read()}
-
-@app.delete("/api/narratives/{filename}")
-def delete_narrative(filename: str):
-    """Deletes a narrative file."""
-    narrative_path = os.path.join(APP_DIR, "narratives", filename)
-    if not os.path.exists(narrative_path):
-        raise HTTPException(status_code=404, detail="Narrative not found")
-    os.remove(narrative_path)
-    return {"message": "Narrative deleted successfully"}
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

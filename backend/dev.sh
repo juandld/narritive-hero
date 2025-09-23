@@ -1,26 +1,16 @@
-#!/usr/bin/env bash
-set -a
-# Load env variables from backend/.env if exists
-source .env 2>/dev/null || true
-set +a
+#!/bin/bash
 
-# Activate venv
+# Activate virtual environment
 source venv/bin/activate
 
-# Figure out project root (one level up from backend/)
-PROJECT_ROOT="$(dirname "$(pwd)")"
+# Check if .env file exists, if not, copy from example
+if [ ! -f .env ]; then
+    echo "Creating .env file from .env.example..."
+    cp .env.example .env
+fi
 
-# Set dynamic folders
-export VOICE_NOTES_DIR="$PROJECT_ROOT/voice_notes"
-export NARRATIVES_DIR="$PROJECT_ROOT/narratives"
+# Install/update dependencies
+pip install -r requirements.txt --quiet
 
-# Auto-create if missing
-mkdir -p "$VOICE_NOTES_DIR" "$NARRATIVES_DIR"
-
-echo "VOICE_NOTES_DIR=$VOICE_NOTES_DIR"
-echo "NARRATIVES_DIR=$NARRATIVES_DIR"
-
-
-# Start FastAPI with autoreload
-uvicorn main:app --reload
-
+# Run the FastAPI server
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload

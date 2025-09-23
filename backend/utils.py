@@ -1,6 +1,7 @@
 import os
 import asyncio
 from services import transcribe_and_save
+import usage_log as usage
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VOICE_NOTES_DIR = os.path.join(APP_DIR, "voice_notes")
@@ -9,6 +10,8 @@ async def on_startup():
     """On startup, create voice notes dir and backfill any missing transcriptions."""
     if not os.path.exists(VOICE_NOTES_DIR):
         os.makedirs(VOICE_NOTES_DIR)
+    # Ensure usage logging directory/files exist
+    usage.ensure_usage_paths()
     
     print("Checking for missing transcriptions...")
     wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')}
