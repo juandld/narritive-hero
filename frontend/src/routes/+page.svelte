@@ -21,6 +21,7 @@
   let selectedNotes: Set<string> = new Set();
   let toastMessage = '';
   let showToast = false;
+  let isUploading = false;
 
   let isNarrativesDrawerOpen = false;
 
@@ -190,19 +191,48 @@
     }
     if (includePlace && detectedPlace) formData.append('place', detectedPlace);
 
+    isUploading = true;
     try {
       const response = await fetch(`${BACKEND_URL}/api/notes`, {
         method: 'POST',
         body: formData
       });
+
       if (response.ok) {
-        console.log('Upload successful');
-        await getNotes(); // Refresh the list
+        const newNote = await response.json();
+        console.log('Upload successful, starting to poll for transcription for', newNote.filename);
+
+        // Poll for transcription
+        const poll = async () => {
+          await getNotes();
+          const note = notes.find((n) => n.filename === newNote.filename);
+
+          // Stop polling if the transcription is present (either success or a failure message)
+          if (note && note.transcription) {
+            isUploading = false;
+            if (note.transcription === 'Transcription failed.') {
+              console.error('Transcription failed for', newNote.filename);
+              toastMessage = 'Transcription failed. Please try again.';
+              showToast = true;
+              setTimeout(() => {
+                showToast = false;
+              }, 3000);
+            } else {
+              console.log('Transcription complete for', newNote.filename);
+            }
+          } else {
+            // If transcription is not yet present, poll again
+            setTimeout(poll, 2000);
+          }
+        };
+        poll(); // Start the first poll
       } else {
         console.error('Upload failed');
+        isUploading = false;
       }
     } catch (error) {
       console.error('Error uploading file:', error);
+      isUploading = false;
     }
   }
 
@@ -257,6 +287,10 @@
 
   {#if showPlacePrompt}
     <PlacePrompt {detectedPlace} on:response={handlePlacePromptResponse} />
+  {/if}
+
+  {#if isUploading}
+    <div class="loading-indicator">Processing your note, please wait...</div>
   {/if}
 
   <NotesList
@@ -315,5 +349,13 @@
     cursor: pointer;
     font-size: 1.2rem;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .loading-indicator {
+    background-color: #f0f0f0;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 5px;
+    text-align: center;
   }
 </style>

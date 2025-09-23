@@ -39,3 +39,6 @@ venv/
 
 # svelte build files
 frontend/.svelte-kit/
+
+# Backend usage logs (created at install/startup)
+backend/usage/
