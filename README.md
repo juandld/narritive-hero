@@ -161,7 +161,10 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
   - GET `/api/narratives` → list filenames
   - GET `/api/narratives/{filename}` → `{ content }`
   - DELETE `/api/narratives/{filename}`
-  - POST `/api/narratives` → body `[{"filename":"…wav"}, …]` creates concatenated narrative
+  - POST `/api/narratives` → body `[{"filename":"…wav"}, …]` creates concatenated narrative (simple join)
+  - POST `/api/narratives/generate` → generate via LLM
+    - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
+    - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`
 - Scenarios (demo)
   - POST `/narrative/interaction` → simple yes/no branching using speech intent
 

@@ -6,6 +6,7 @@
   import NotesList from '../lib/components/NotesList.svelte';
   import FileUpload from '../lib/components/FileUpload.svelte';
   import NarrativesDrawer from '../lib/components/NarrativesDrawer.svelte';
+  import NarrativeGenerateModal from '../lib/components/NarrativeGenerateModal.svelte';
 
   type Note = {
     filename: string;
@@ -34,6 +35,9 @@
   $: multiUploadPercent = multiUploadTotal ? Math.floor((multiUploadIndex / multiUploadTotal) * 100) : 0;
 
   let isNarrativesDrawerOpen = false;
+  let initialNarrativeSelect: string | null = null;
+  let isNarrativeModalOpen = false;
+  let isGeneratingNarrative = false;
 
   let includeDate: boolean = true;
   let includePlace: boolean = false;
@@ -110,39 +114,44 @@
     selectedNotes = new Set(selectedNotes);
   }
 
-  async function createNarrative() {
-    const selectedNotesArray = Array.from(selectedNotes).map((filename) => ({
-      filename
-    }));
+  function createNarrative() {
+    isNarrativeModalOpen = true;
+  }
 
+  async function submitNarrativeGeneration(e: CustomEvent<{ extra_text: string; provider: string; model: string; temperature: number }>) {
+    const selectedNotesArray = Array.from(selectedNotes).map((filename) => ({ filename }));
+    const { extra_text, provider, model, temperature } = e.detail;
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives`, {
+      isGeneratingNarrative = true;
+      const response = await fetch(`${BACKEND_URL}/api/narratives/generate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(selectedNotesArray)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: selectedNotesArray, extra_text, provider, model: model || undefined, temperature })
       });
-
       if (response.ok) {
+        const data = await response.json();
+        const fname = data?.filename as string | undefined;
         toastMessage = 'Narrative created successfully!';
         showToast = true;
-        setTimeout(() => {
-          showToast = false;
-        }, 3000);
+        setTimeout(() => { showToast = false; }, 3000);
         selectedNotes.clear();
         selectedNotes = new Set(selectedNotes);
-        isNarrativesDrawerOpen = true; // Open the drawer to show the new narrative
+        initialNarrativeSelect = fname || null;
+        isNarrativesDrawerOpen = true;
+        isNarrativeModalOpen = false;
       } else {
         console.error('Failed to create narrative');
         toastMessage = 'Failed to create narrative.';
         showToast = true;
-        setTimeout(() => {
-          showToast = false;
-        }, 3000);
+        setTimeout(() => { showToast = false; }, 3000);
       }
     } catch (error) {
       console.error('Error creating narrative:', error);
+      toastMessage = 'Error creating narrative.';
+      showToast = true;
+      setTimeout(() => { showToast = false; }, 3000);
+    } finally {
+      isGeneratingNarrative = false;
     }
   }
 
@@ -450,7 +459,14 @@
   <BulkActions selectedCount={selectedNotes.size} {isBulkDeleting} on:deleteSelected={deleteSelectedNotes} on:createNarrative={createNarrative} />
 </main>
 
-<NarrativesDrawer isOpen={isNarrativesDrawerOpen} onClose={() => (isNarrativesDrawerOpen = false)} />
+<NarrativesDrawer isOpen={isNarrativesDrawerOpen} initialSelect={initialNarrativeSelect} onClose={() => (isNarrativesDrawerOpen = false)} />
+<NarrativeGenerateModal
+  open={isNarrativeModalOpen}
+  selected={Array.from(selectedNotes)}
+  loading={isGeneratingNarrative}
+  on:close={() => (isNarrativeModalOpen = false)}
+  on:generate={submitNarrativeGeneration}
+/>
 
 <style>
   main {

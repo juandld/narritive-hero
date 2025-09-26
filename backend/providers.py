@@ -66,10 +66,19 @@ def key_label_from_index(index: int) -> str:
     return f"gemini_key_{index}_{key[-4:] if key else '????'}"
 
 
-def invoke_google(messages: List[HumanMessage]) -> Tuple[object, int]:
-    """Try Gemini clients in order (no internal retries). Returns (response, key_index)."""
+def invoke_google(messages: List[HumanMessage], model: str | None = None) -> Tuple[object, int]:
+    """Try Gemini clients in order (no internal retries). Returns (response, key_index).
+
+    If `model` is provided, use a transient set of clients for that model.
+    """
     last_err: Optional[Exception] = None
-    for idx, llm in enumerate(GOOGLE_LLMS):
+    llms: List[ChatGoogleGenerativeAI]
+    if model and model != config.GOOGLE_MODEL:
+        # Build a temporary rotation with the requested model
+        llms = [ChatGoogleGenerativeAI(model=model, api_key=k) for k in GOOGLE_KEYS]
+    else:
+        llms = GOOGLE_LLMS
+    for idx, llm in enumerate(llms):
         try:
             # Disable internal retries by overriding keyword
             return llm.invoke(messages, max_retries=0), idx
@@ -97,6 +106,16 @@ def title_with_openai(text: str) -> str:
     resp = llm.invoke(prompt)
     raw = str(getattr(resp, "content", resp))
     return normalize_title_output(raw)
+
+
+def openai_chat(messages: list[HumanMessage], model: str | None = None, temperature: float = 0.2) -> str:
+    """Generic OpenAI chat wrapper returning content text."""
+    if not config.OPENAI_API_KEY:
+        raise RuntimeError("OpenAI fallback not configured.")
+    use_model = model or config.OPENAI_NARRATIVE_MODEL
+    llm = ChatOpenAI(model=use_model, api_key=config.OPENAI_API_KEY, temperature=temperature)
+    resp = llm.invoke(messages)
+    return str(getattr(resp, "content", resp))
 
 
 def normalize_title_output(raw: str) -> str:

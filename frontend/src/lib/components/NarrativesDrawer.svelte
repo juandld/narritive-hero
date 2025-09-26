@@ -8,6 +8,7 @@
 
   export let isOpen: boolean;
   export let onClose: () => void;
+  export let initialSelect: string | null = null;
 
   let narratives: Narrative[] = [];
   let selectedNarrative: Narrative | null = null;
@@ -67,6 +68,11 @@
 
   $: if (isOpen) {
     getNarratives();
+  }
+
+  // If parent provides an initial filename to select, fetch its content when open
+  $: if (isOpen && initialSelect) {
+    getNarrativeContent(initialSelect);
   }
 </script>
 
