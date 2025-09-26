@@ -23,7 +23,7 @@ A web app to record voice notes and turn them into organized, searchable narrati
 
 - Docker and Docker Compose (optional)
 - Node.js and npm (frontend)
-- Python 3.9+ and pip (backend)
+- Python 3.10+ and pip (backend)
 - API keys: Google AI (Gemini). Optional: OpenAI (fallback)
 
 ## Running the Project
@@ -141,7 +141,7 @@ Each audio file `storage/voice_notes/<base>.wav` has `storage/transcriptions/<ba
 }
 ```
 
-On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metadata is backfilled.
+Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files are ignored.
 
 ## Backend Behavior
 
@@ -149,7 +149,6 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
   - Primary: Gemini via LangChain (key rotation on 429/quota)
   - Fallback: LangChain OpenAI Whisper/Chat (when configured)
 - Startup backfill (non-blocking)
-  - Migrates legacy files to JSON
   - Creates JSON for `.wav` lacking one
   - Does not re-transcribe if JSON exists (delete JSON to force refresh)
 - Usage logging

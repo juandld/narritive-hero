@@ -49,7 +49,7 @@ TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 NARRATIVES_DIR = config.NARRATIVES_DIR
 
 # Mount static files directory for voice notes
-app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
+app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR, check_dir=False), name="voice_notes")
 
 @app.on_event("startup")
 async def startup_event():
