@@ -1,9 +1,9 @@
 """
 Provider utilities: Gemini (Google) and OpenAI fallbacks via LangChain.
 
-Encapsulates key rotation, retry strategy decisions, and simple helpers for
-transcription and title generation. Keeping this here makes services.py smaller
-and easier to scan.
+This module is designed to be light to import for tests and app startup.
+To avoid slow imports and side effects, heavyweight SDKs and client objects
+are created lazily inside function bodies rather than at module import time.
 """
 
 from __future__ import annotations
@@ -12,9 +12,7 @@ import io
 from typing import List, Optional, Tuple
 
 import logging
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
 import config
 
@@ -22,18 +20,28 @@ import config
 logger = logging.getLogger("narrative.providers")
 
 
-# Initialize Gemini clients (one per API key) for rotation
+# Collect Gemini API keys (cheap and side‑effect free)
 GOOGLE_KEYS = config.collect_google_api_keys()
-GOOGLE_LLMS: List[ChatGoogleGenerativeAI] = [
-    ChatGoogleGenerativeAI(model=config.GOOGLE_MODEL, api_key=k) for k in GOOGLE_KEYS
-]
 
-# Log configured model and key status for visibility
-logger.info(
-    "Gemini configured: model=%s, keys=%s",
-    config.GOOGLE_MODEL,
-    len(GOOGLE_KEYS),
-)
+# Lazy cache for constructed Gemini clients keyed by model
+_GOOGLE_LLMS_CACHE: dict[str, List[object]] = {}
+
+def _get_google_llms(model: Optional[str] = None) -> List[object]:
+    """Build or fetch cached Gemini clients for the given model lazily.
+
+    Import of langchain/SDKs happens inside to keep module import fast.
+    """
+    use_model = model or config.GOOGLE_MODEL
+    if use_model in _GOOGLE_LLMS_CACHE:
+        return _GOOGLE_LLMS_CACHE[use_model]
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI  # local import
+    except Exception as e:
+        raise RuntimeError("Gemini provider not available: langchain_google_genai missing") from e
+    llms = [ChatGoogleGenerativeAI(model=use_model, api_key=k) for k in GOOGLE_KEYS]
+    _GOOGLE_LLMS_CACHE[use_model] = llms
+    logger.info("Gemini configured: model=%s, keys=%s", use_model, len(GOOGLE_KEYS))
+    return llms
 
 
 def is_rate_limit_error(e: Exception) -> bool:
@@ -72,12 +80,8 @@ def invoke_google(messages: List[HumanMessage], model: str | None = None) -> Tup
     If `model` is provided, use a transient set of clients for that model.
     """
     last_err: Optional[Exception] = None
-    llms: List[ChatGoogleGenerativeAI]
-    if model and model != config.GOOGLE_MODEL:
-        # Build a temporary rotation with the requested model
-        llms = [ChatGoogleGenerativeAI(model=model, api_key=k) for k in GOOGLE_KEYS]
-    else:
-        llms = GOOGLE_LLMS
+    # Build or fetch LLM rotation lazily
+    llms = _get_google_llms(model)
     for idx, llm in enumerate(llms):
         try:
             # Disable internal retries by overriding keyword
@@ -97,6 +101,7 @@ def title_with_openai(text: str) -> str:
     """Generate a short title via OpenAI (LangChain)."""
     if not config.OPENAI_API_KEY:
         raise RuntimeError("OpenAI fallback not configured.")
+    from langchain_openai import ChatOpenAI  # local import
     llm = ChatOpenAI(model=config.OPENAI_TITLE_MODEL, api_key=config.OPENAI_API_KEY, temperature=0.3)
     prompt = (
         "Return exactly one short title (5–8 words) for the transcription below. "
@@ -112,6 +117,7 @@ def openai_chat(messages: list[HumanMessage], model: str | None = None, temperat
     """Generic OpenAI chat wrapper returning content text."""
     if not config.OPENAI_API_KEY:
         raise RuntimeError("OpenAI fallback not configured.")
+    from langchain_openai import ChatOpenAI  # local import
     use_model = model or config.OPENAI_NARRATIVE_MODEL
     llm = ChatOpenAI(model=use_model, api_key=config.OPENAI_API_KEY, temperature=temperature)
     resp = llm.invoke(messages)

@@ -13,8 +13,11 @@ load_dotenv()
 
 # Base application directories
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VOICE_NOTES_DIR = os.path.join(BASE_DIR, "voice_notes")
-TRANSCRIPTS_DIR = os.path.join(BASE_DIR, "transcriptions")
+# Consolidate storage under a single folder
+STORAGE_DIR = os.path.join(BASE_DIR, "storage")
+VOICE_NOTES_DIR = os.path.join(STORAGE_DIR, "voice_notes")
+TRANSCRIPTS_DIR = os.path.join(STORAGE_DIR, "transcriptions")
+NARRATIVES_DIR = os.path.join(STORAGE_DIR, "narratives")
 
 # Models and providers
 def _normalize_google_model(name: str) -> str:

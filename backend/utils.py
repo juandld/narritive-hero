@@ -7,10 +7,12 @@ import contextlib
 from datetime import datetime
 from services import transcribe_and_save
 import usage_log as usage
+import config
 
-APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VOICE_NOTES_DIR = os.path.join(APP_DIR, "voice_notes")
-TRANSCRIPTS_DIR = os.path.join(APP_DIR, "transcriptions")
+# Centralized paths; keep module vars for monkeypatching in tests
+APP_DIR = config.BASE_DIR
+VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
+TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 
 async def on_startup():
     """On startup, create voice notes dir and backfill any missing transcriptions."""
@@ -18,11 +20,59 @@ async def on_startup():
         os.makedirs(VOICE_NOTES_DIR)
     if not os.path.exists(TRANSCRIPTS_DIR):
         os.makedirs(TRANSCRIPTS_DIR)
+    # Ensure narratives dir exists under storage
+    try:
+        import config as _cfg
+        NARRATIVES_DIR = getattr(_cfg, "NARRATIVES_DIR", os.path.join(APP_DIR, "storage", "narratives"))
+    except Exception:
+        NARRATIVES_DIR = os.path.join(APP_DIR, "storage", "narratives")
+    if not os.path.exists(NARRATIVES_DIR):
+        os.makedirs(NARRATIVES_DIR)
     # titles directory is deprecated; we will migrate any leftover files below
     # Ensure usage logging directory/files exist
     usage.ensure_usage_paths()
     
     print("Checking for missing transcriptions...")
+
+    # One-time migration: move legacy top-level folders into storage/
+    def _move_all(src_dir: str, dst_dir: str, exts: tuple[str, ...] | None = None):
+        try:
+            if not os.path.isdir(src_dir) or os.path.abspath(src_dir) == os.path.abspath(dst_dir):
+                return
+            os.makedirs(dst_dir, exist_ok=True)
+            for name in list(os.listdir(src_dir)):
+                s = os.path.join(src_dir, name)
+                if not os.path.isfile(s):
+                    continue
+                if exts is not None and not any(name.lower().endswith(e) for e in exts):
+                    continue
+                d = os.path.join(dst_dir, name)
+                try:
+                    if os.path.exists(d):
+                        # Keep the larger file or prefer JSON over TXT
+                        keep_src = os.path.getsize(s) > os.path.getsize(d)
+                        if keep_src:
+                            shutil.move(s, d)
+                        else:
+                            os.remove(s)
+                    else:
+                        shutil.move(s, d)
+                except Exception as me:
+                    print(f"Warning: could not move {s} -> {d}: {me}")
+            # Try to remove empty dir
+            try:
+                os.rmdir(src_dir)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Warning: migration from {src_dir} failed: {e}")
+
+    OLD_VOICE = os.path.join(APP_DIR, "voice_notes")
+    OLD_TRANS = os.path.join(APP_DIR, "transcriptions")
+    OLD_NARR = os.path.join(APP_DIR, "narratives")
+    _move_all(OLD_VOICE, VOICE_NOTES_DIR, exts=(".wav", ".webm", ".ogg", ".m4a", ".mp3"))
+    _move_all(OLD_TRANS, TRANSCRIPTS_DIR, exts=(".json", ".txt"))
+    _move_all(OLD_NARR, NARRATIVES_DIR, exts=(".txt",))
     # Migrate any stray .txt from voice_notes to transcriptions
     for f in list(os.listdir(VOICE_NOTES_DIR)):
         if f.endswith('.txt'):

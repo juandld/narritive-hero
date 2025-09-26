@@ -15,7 +15,7 @@ for logger_name in loggers_to_silence:
 from fastapi import FastAPI, File, UploadFile, Form, Response, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from services import process_interaction, get_notes, transcribe_and_save
+from services import get_notes, transcribe_and_save
 from models import TagsUpdate
 from utils import on_startup
 import uvicorn
@@ -43,27 +43,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Use centralized config paths, but keep module vars for tests to monkeypatch
+VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
+TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
+NARRATIVES_DIR = config.NARRATIVES_DIR
+
 # Mount static files directory for voice notes
-VOICE_NOTES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'voice_notes'))
-TRANSCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'transcriptions'))
-NARRATIVES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'narratives'))
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 
 @app.on_event("startup")
 async def startup_event():
     await on_startup()
 
-@app.post("/narrative/interaction")
-async def handle_interaction(
-    audio_file: UploadFile = File(...), 
-    current_scenario_id: str = Form(...)
-):
-    """
-    This endpoint receives audio and the current scenario ID,
-    processes them, and returns the next scenario.
-    """
-    result = process_interaction(audio_file.file, current_scenario_id)
-    return result
+## LangHero scenario route removed from Narrative Hero
 
 @app.get("/api/notes")
 async def read_notes():

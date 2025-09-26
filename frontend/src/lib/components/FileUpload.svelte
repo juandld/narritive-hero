@@ -27,7 +27,6 @@
   class:dragover={isDragover}
   role="region"
   aria-label="File upload dropzone"
-  tabindex="0"
   on:dragenter={() => (isDragover = true)}
   on:dragleave={() => (isDragover = false)}
   on:dragover|preventDefault

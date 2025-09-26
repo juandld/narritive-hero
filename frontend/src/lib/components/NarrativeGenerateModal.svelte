@@ -34,28 +34,28 @@
     </div>
     <div class="modal-body">
       <p style="margin:0 0 .5rem 0; color:#6b7280;">{selected.length} note(s) selected</p>
-      <label>Extra Context</label>
-      <textarea bind:value={extra_text} placeholder="Paste additional context to include (optional)"></textarea>
+      <label for="extra_text">Extra Context</label>
+      <textarea id="extra_text" bind:value={extra_text} placeholder="Paste additional context to include (optional)"></textarea>
 
       <div class="row">
         <div class="col">
-          <label>Provider</label>
-          <select bind:value={provider}>
+          <label for="provider">Provider</label>
+          <select id="provider" bind:value={provider}>
             <option value="auto">Auto (Gemini → OpenAI)</option>
             <option value="gemini">Gemini</option>
             <option value="openai">OpenAI</option>
           </select>
         </div>
         <div class="col">
-          <label>Model (optional)</label>
-          <input type="text" bind:value={model} placeholder="e.g., gemini-2.5-flash or gpt-4o" />
+          <label for="model">Model (optional)</label>
+          <input id="model" type="text" bind:value={model} placeholder="e.g., gemini-2.5-flash or gpt-4o" />
         </div>
       </div>
 
       <div class="row">
         <div class="col">
-          <label>Temperature: {temperature.toFixed(2)}</label>
-          <input type="range" min="0" max="1" step="0.05" bind:value={temperature} />
+          <label for="temperature">Temperature: {temperature.toFixed(2)}</label>
+          <input id="temperature" type="range" min="0" max="1" step="0.05" bind:value={temperature} />
         </div>
       </div>
     </div>

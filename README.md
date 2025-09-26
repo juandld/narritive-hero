@@ -5,7 +5,7 @@ A web app to record voice notes and turn them into organized, searchable narrati
 ## Features
 
 - Voice capture and uploads: record in-browser or upload `.wav` files
-- Auto transcription and titles: Gemini 1.5 Flash via LangChain
+- Auto transcription and titles: Gemini 2.5 Flash via LangChain
 - Resilient providers: rotate multiple Gemini keys and fallback to OpenAI Whisper/Chat through LangChain
 - JSON metadata per note: title, transcription, date, duration, topics, tags
 - Filtering & search: by date range, topics, duration, and free-text query
@@ -106,6 +106,10 @@ For development, you can run the frontend and backend services separately.
     ```
     The frontend will be available at `http://localhost:5173`.
 
+    - Optional: Chrome DevTools notice
+      - Chrome may request `/.well-known/appspecific/com.chrome.devtools.json` to auto-configure project settings.
+      - A minimal file is provided at `frontend/static/.well-known/appspecific/com.chrome.devtools.json` to satisfy this and suppress the notice.
+
 ## Project Structure
 
 - `frontend/` SvelteKit app (components for filters, bulk actions, notes, etc.)
@@ -115,14 +119,15 @@ For development, you can run the frontend and backend services separately.
   - `note_store.py` JSON read/write and metadata helpers
   - `services.py` lean business logic (transcribe/title + notes listing)
   - `main.py` API routes
-- `voice_notes/` source audio `.wav` files
-- `transcriptions/` one JSON per note (see schema below)
-- `narratives/` saved narratives as `.txt`
+- `storage/` consolidated app data
+  - `storage/voice_notes/` source audio (e.g., `.wav`, `.mp3`)
+  - `storage/transcriptions/` one JSON per note (see schema below)
+  - `storage/narratives/` saved narratives as `.txt`
 - `compose.yaml` Docker Compose services
 
 ## Note JSON Schema
 
-Each audio file `voice_notes/<base>.wav` has `transcriptions/<base>.json`:
+Each audio file `storage/voice_notes/<base>.wav` has `storage/transcriptions/<base>.json`:
 
 ```json
 {
@@ -165,8 +170,7 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
   - POST `/api/narratives/generate` → generate via LLM
     - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
     - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`
-- Scenarios (demo)
-  - POST `/narrative/interaction` → simple yes/no branching using speech intent
+  
 
 ## Frontend Highlights
 
@@ -175,9 +179,34 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
 - NoteItem: tag chips with compact color picker, preview snippet, expand/collapse
 - Config: `frontend/src/lib/config.ts` hosts `BACKEND_URL`
 
+## LangHero (separate app)
+
+- The previous experimental "Learn" route has been split out into its own project: `langhero`.
+- Location: `/home/raw/projects/langhero` (same stack and dev/deploy flow as this project).
+- Run it the same way (Docker Compose or separate backend/frontend dev). Its frontend root renders the scenario UI and uses its own backend copy of the scenario route.
+
 ## Tips
 
 - Use multiple Gemini keys to smooth through quota spikes
 - Add OpenAI key for reliable fallback
 - To reprocess a note, delete its JSON; backend will recreate it on startup or next upload
 - FFmpeg with pydub improves audio format handling (pydub installed; add FFmpeg if needed)
+
+## Testing
+
+- Location and structure
+  - All test files and scripts live under `tests/`.
+  - Backend: `tests/backend/tests/…` (pytest tests), `tests/backend/test.sh` (runner), `tests/backend/run_smoke_tests.py` (no-deps smoke).
+  - Config and dev deps: `tests/backend/pytest.ini`, `tests/backend/requirements-dev.txt`.
+
+- Quick run
+  - `bash tests/backend/test.sh` creates/activates a local venv if possible, runs pytest when available, and falls back to smoke tests when offline.
+  - Or use Make from within `tests/`: `make -C tests test`.
+
+- Full backend pytest
+  - `bash tests/backend/setup_venv.sh`
+  - `source tests/backend/.venv/bin/activate`
+  - `PYTHONPATH=backend pytest -q tests/backend`
+
+- Run everything
+  - `bash tests/run_all.sh` runs backend tests, then frontend tests if available.
