@@ -21,13 +21,19 @@ from utils import on_startup
 import uvicorn
 import os
 from datetime import datetime
+import uuid
 
 app = FastAPI()
 
 # Configure CORS to allow requests from the SvelteKit frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # The default SvelteKit dev server address
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost",
+        "http://127.0.0.1",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,8 +74,19 @@ async def create_note(
     place: str = Form(None)
 ):
     """API endpoint to upload a new note."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{timestamp}.wav"
+    ct = (file.content_type or '').lower()
+    if 'webm' in ct:
+        ext = 'webm'
+    elif 'ogg' in ct:
+        ext = 'ogg'
+    elif 'm4a' in ct:
+        ext = 'm4a'
+    elif 'mp3' in ct:
+        ext = 'mp3'
+    else:
+        ext = 'wav'
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    filename = f"{timestamp}_{uuid.uuid4().hex[:6]}.{ext}"
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
 
     with open(file_path, "wb") as buffer:
@@ -81,29 +98,36 @@ async def create_note(
     
     return {"filename": filename, "message": "File upload successful, transcription started."}
 
+@app.post("/api/notes/{filename}/retry")
+async def retry_note(background_tasks: BackgroundTasks, filename: str):
+    """Manually trigger reprocessing (transcribe/title) for a specific note."""
+    file_path = os.path.join(VOICE_NOTES_DIR, filename)
+    if not os.path.exists(file_path):
+        return Response(status_code=404)
+    background_tasks.add_task(transcribe_and_save, file_path)
+    return {"status": "queued"}
+
 @app.delete("/api/notes/{filename}")
 async def delete_note(filename: str):
     """API endpoint to delete a note."""
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
     if os.path.exists(file_path):
         os.remove(file_path)
-        
-        # Delete associated files
-        base_filename = filename.replace('.wav', '')
+        # Delete associated JSON (and legacy txt)
+        base_filename = os.path.splitext(filename)[0]
         json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
         legacy_txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
         if os.path.exists(json_path):
             os.remove(json_path)
         if os.path.exists(legacy_txt_path):
             os.remove(legacy_txt_path)
-            
         return Response(status_code=200)
     return Response(status_code=404)
 
 @app.patch("/api/notes/{filename}/tags")
 async def update_tags(filename: str, payload: TagsUpdate):
     """Update user-defined tags for a note (stored in JSON)."""
-    base_filename = filename.replace('.wav', '')
+    base_filename = os.path.splitext(filename)[0]
     json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
     # Ensure a JSON exists
     if not os.path.exists(json_path):

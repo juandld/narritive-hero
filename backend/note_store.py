@@ -49,14 +49,15 @@ def note_json_path(base_filename: str) -> str:
     return os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
 
 
-def build_note_payload(base_filename: str, title: str, transcription: str) -> dict:
-    audio_path = os.path.join(config.VOICE_NOTES_DIR, f"{base_filename}.wav")
-    mtime = os.path.getmtime(audio_path)
-    date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-    length_sec = audio_length_seconds(audio_path)
+def build_note_payload(audio_filename: str, title: str, transcription: str) -> dict:
+    """Build note JSON payload using the actual audio filename (with extension)."""
+    audio_path = os.path.join(config.VOICE_NOTES_DIR, audio_filename)
+    mtime = os.path.getmtime(audio_path) if os.path.exists(audio_path) else None
+    date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d') if mtime else None
+    length_sec = audio_length_seconds(audio_path) if mtime else None
     topics = infer_topics(transcription, title)
     return {
-        "filename": f"{base_filename}.wav",
+        "filename": audio_filename,
         "title": title,
         "transcription": transcription,
         "date": date_str,
@@ -105,4 +106,3 @@ def save_note_json(base_filename: str, payload: dict) -> None:
     os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
     with open(note_json_path(base_filename), 'w') as jf:
         json.dump(payload, jf, ensure_ascii=False)
-

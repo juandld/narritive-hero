@@ -88,7 +88,7 @@
 <li style="margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px;">
   <input type="checkbox" checked={selected} on:change={onSelect} />
   <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;">
-    <p style="margin:0; font-weight: 600; font-size: 1rem;">{note.title || 'Untitled'}</p>
+    <p style="margin:0; font-weight: 600; font-size: 1rem;">{note.title || note.filename.replace(/\.wav$/i,'')}</p>
     <small style="color:#666;">{note.date}{#if note.length_seconds} • {note.length_seconds}s{/if}</small>
   </div>
   <div style="margin: 0.25rem 0 0.5rem 0; display:flex; gap:0.35rem; flex-wrap: wrap;">
@@ -125,7 +125,13 @@
   </div>
   <audio controls src="{`${BACKEND_URL}/voice_notes/${note.filename}`}" style="width: 100%; margin-bottom: 0.5rem;"></audio>
   <blockquote style="background-color: white; padding: 0.5rem 1rem; border-left: 5px solid #4285f4; margin: 0; border-radius: 4px;">
-    <p>{expanded ? note.transcription : (previewText.length > MAX_PREVIEW ? previewText.slice(0, MAX_PREVIEW) + '…' : previewText)}</p>
+    <p>
+      {#if note.transcription}
+        {expanded ? note.transcription : (previewText.length > MAX_PREVIEW ? previewText.slice(0, MAX_PREVIEW) + '…' : previewText)}
+      {:else}
+        <em>Transcribing…</em>
+      {/if}
+    </p>
     {#if previewText && previewText.length > 0}
       <button
         on:click={toggleExpand}

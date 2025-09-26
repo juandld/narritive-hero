@@ -27,6 +27,11 @@
   let showToast = false;
   let isUploading = false;
   let isBulkDeleting = false;
+  // Multi-file upload progress
+  let multiUploadActive = false;
+  let multiUploadTotal = 0;
+  let multiUploadIndex = 0;
+  $: multiUploadPercent = multiUploadTotal ? Math.floor((multiUploadIndex / multiUploadTotal) * 100) : 0;
 
   let isNarrativesDrawerOpen = false;
 
@@ -237,7 +242,7 @@
     }
   }
 
-  async function uploadRecording(blob: Blob) {
+  async function uploadRecording(blob: Blob, skipPoll: boolean = false) {
     const formData = new FormData();
     formData.append('file', blob, 'recording.wav');
     if (includeDate) {
@@ -256,31 +261,35 @@
       if (response.ok) {
         const newNote = await response.json();
         console.log('Upload successful, starting to poll for transcription for', newNote.filename);
-
-        // Poll for transcription
-        const poll = async () => {
+        if (skipPoll) {
+          // Quick refresh only; batch handler will keep refreshing the list
           await getNotes();
-          const note = notes.find((n) => n.filename === newNote.filename);
+        } else {
+          // Poll for transcription
+          const poll = async () => {
+            await getNotes();
+            const note = notes.find((n) => n.filename === newNote.filename);
 
-          // Stop polling if the transcription is present (either success or a failure message)
-          if (note && note.transcription) {
-            isUploading = false;
-            if (note.transcription === 'Transcription failed.') {
-              console.error('Transcription failed for', newNote.filename);
-              toastMessage = 'Transcription failed. Please try again.';
-              showToast = true;
-              setTimeout(() => {
-                showToast = false;
-              }, 3000);
+            // Stop polling if the transcription is present (either success or a failure message)
+            if (note && note.transcription) {
+              isUploading = false;
+              if (note.transcription === 'Transcription failed.') {
+                console.error('Transcription failed for', newNote.filename);
+                toastMessage = 'Transcription failed. Please try again.';
+                showToast = true;
+                setTimeout(() => {
+                  showToast = false;
+                }, 3000);
+              } else {
+                console.log('Transcription complete for', newNote.filename);
+              }
             } else {
-              console.log('Transcription complete for', newNote.filename);
+              // If transcription is not yet present, poll again
+              setTimeout(poll, 2000);
             }
-          } else {
-            // If transcription is not yet present, poll again
-            setTimeout(poll, 2000);
-          }
-        };
-        poll(); // Start the first poll
+          };
+          poll();
+        }
       } else {
         console.error('Upload failed');
         isUploading = false;
@@ -358,6 +367,23 @@
     const file = event.detail;
     await uploadRecording(file);
   }
+  // Periodic refresh window for batch uploads
+  let batchRefreshTimer: number | null = null;
+  function startBatchRefreshWindow(ms = 30000) {
+    if (batchRefreshTimer) {
+      clearInterval(batchRefreshTimer);
+      batchRefreshTimer = null;
+    }
+    const started = Date.now();
+    batchRefreshTimer = setInterval(async () => {
+      await getNotes();
+      if (Date.now() - started > ms) {
+        if (batchRefreshTimer) clearInterval(batchRefreshTimer);
+        batchRefreshTimer = null;
+      }
+    }, 2000) as unknown as number;
+  }
+
 </script>
 
 <main style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem;">
@@ -366,7 +392,24 @@
   <h1 style="text-align: center;">Narrative Hero</h1>
 
   <div class="controls-container">
-    <FileUpload on:file-selected={handleFileSelected} />
+    <FileUpload on:files-selected={async (e) => {
+      const files: File[] = e.detail;
+      if (!files || files.length === 0) return;
+      multiUploadActive = true;
+      multiUploadTotal = files.length;
+      multiUploadIndex = 0;
+      for (const f of files) {
+        multiUploadIndex += 1;
+        await uploadRecording(f, true);
+      }
+      startBatchRefreshWindow(30000);
+      // slight delay to let the last polling settle
+      setTimeout(() => {
+        multiUploadActive = false;
+        multiUploadTotal = 0;
+        multiUploadIndex = 0;
+      }, 300);
+    }} />
     <button class="narrative-button" on:click={() => (isNarrativesDrawerOpen = true)}>View Narratives</button>
   </div>
 
@@ -382,7 +425,12 @@
     <PlacePrompt {detectedPlace} on:response={handlePlacePromptResponse} />
   {/if}
 
-  {#if isUploading}
+  {#if multiUploadActive}
+    <div class="bulk-upload-indicator">
+      Uploading {multiUploadIndex} / {multiUploadTotal}…
+      <div class="progress"><div class="bar" style="width: {multiUploadPercent}%"></div></div>
+    </div>
+  {:else if isUploading}
     <div class="loading-indicator">Processing your note, please wait...</div>
   {/if}
 
@@ -435,6 +483,15 @@
     border-radius: 5px;
     text-align: center;
   }
+  .bulk-upload-indicator {
+    background-color: #f0f0f0;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 5px;
+    text-align: center;
+  }
+  .progress { height: 8px; background:#e5e7eb; border-radius: 9999px; margin-top: 8px; overflow:hidden; }
+  .bar { height: 100%; background:#3B82F6; width: 0; transition: width 0.2s ease; }
 
   /* Filters moved to FiltersBar component */
 </style>

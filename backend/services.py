@@ -21,10 +21,10 @@ import usage_log as usage
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure providers and models
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-flash")
-OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
-OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", "gpt-4o-mini")
+# Configure providers and models (use centralized, normalized config)
+GOOGLE_MODEL = config.GOOGLE_MODEL
+OPENAI_TRANSCRIBE_MODEL = config.OPENAI_TRANSCRIBE_MODEL
+OPENAI_TITLE_MODEL = config.OPENAI_TITLE_MODEL
 
 def _collect_google_api_keys() -> List[str]:
     keys = []
@@ -62,6 +62,8 @@ def _should_google_fallback(e: Exception) -> bool:
         or "unauthorized" in s
         or "permission" in s
         or "invalid api key" in s
+        or "not found" in s
+        or "publisher model" in s
     )
 
 async def _ainvoke_google(messages: List[HumanMessage]) -> Tuple[object, int]:
@@ -248,6 +250,7 @@ TRANSCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 
 async def transcribe_and_save(wav_path):
     """Transcribes and titles an audio file, saving the results."""
     base_filename = os.path.basename(wav_path)
+    ext = os.path.splitext(base_filename)[1].lower().lstrip('.') or 'wav'
     print(f"Starting transcription process for {base_filename}...")
     try:
         # Read audio bytes
@@ -256,44 +259,68 @@ async def transcribe_and_save(wav_path):
 
         # Transcribe with provider rotation & fallback
         print(f"Transcribing {base_filename} from local file bytes...")
+        audio_b64 = b64encode(audio_bytes).decode("utf-8")
+        # Choose mime type based on ext
+        mime = 'audio/wav'
+        if ext in ('webm',):
+            mime = 'audio/webm'
+        elif ext in ('ogg',):
+            mime = 'audio/ogg'
+        elif ext in ('mp3',):
+            mime = 'audio/mp3'
+        elif ext in ('m4a',):
+            mime = 'audio/mp4'
+        transcription_message = HumanMessage(
+            content=[
+                {"type": "text", "text": "Transcribe this audio recording."},
+                {
+                    "type": "file",
+                    "source_type": "base64",
+                    "mime_type": mime,
+                    "data": audio_b64,
+                },
+            ]
+        )
         try:
-            audio_b64 = b64encode(audio_bytes).decode("utf-8")
-            transcription_message = HumanMessage(
-                content=[
-                    {"type": "text", "text": "Transcribe this audio recording."},
-                    {
-                        "type": "file",
-                        "source_type": "base64",
-                        "mime_type": "audio/wav",
-                        "data": audio_b64,
-                    },
-                ]
-            )
-            # Use sync path without internal async retries; run in a thread
-            transcription_response, key_index = await asyncio.to_thread(
-                providers.invoke_google, [transcription_message]
-            )
-            transcribed_text = transcription_response.content
-            usage.log_usage(
-                event="transcribe",
-                provider="gemini",
-                model=config.GOOGLE_MODEL,
-                key_label=providers.key_label_from_index(key_index),
-                status="success",
-            )
-        except Exception as gerr:
-            if providers.should_google_fallback(gerr):
-                # Fallback to OpenAI Whisper
-                transcribed_text = providers.transcribe_with_openai(audio_bytes, file_ext="wav")
+            # Try Gemini quickly (up to 2 attempts across rotated keys), then fallback
+            gemini_ok = False
+            last_key_index = None
+            for attempt in range(2):
+                try:
+                    transcription_response, key_index = await asyncio.to_thread(
+                        providers.invoke_google, [transcription_message]
+                    )
+                    last_key_index = key_index
+                    transcribed_text = transcription_response.content
+                    gemini_ok = True
+                    break
+                except Exception as ge:
+                    print(f"Gemini transcribe attempt {attempt+1} failed for {base_filename}: {ge}")
+                    if providers.should_google_fallback(ge):
+                        break
+                    # non-rate-limit error: try once more, then fallback
+                    continue
+            if gemini_ok:
                 usage.log_usage(
                     event="transcribe",
-                    provider="openai",
-                    model=config.OPENAI_TRANSCRIBE_MODEL,
-                    key_label=usage.OPENAI_LABEL,
+                    provider="gemini",
+                    model=config.GOOGLE_MODEL,
+                    key_label=providers.key_label_from_index(last_key_index or 0),
                     status="success",
                 )
             else:
-                raise gerr
+                raise RuntimeError("Gemini unavailable, falling back")
+        except Exception as e:
+            # Fallback to OpenAI Whisper
+            print(f"Falling back to Whisper for {base_filename}: {e}")
+            transcribed_text = providers.transcribe_with_openai(audio_bytes, file_ext=ext)
+            usage.log_usage(
+                event="transcribe",
+                provider="openai",
+                model=config.OPENAI_TRANSCRIBE_MODEL,
+                key_label=usage.OPENAI_LABEL,
+                status="success",
+            )
         print(f"Successfully transcribed {base_filename}.")
 
         # Generate title
@@ -301,23 +328,46 @@ async def transcribe_and_save(wav_path):
         try:
             title_message = HumanMessage(
                 content=[
-                    {"type": "text", "text": f"Generate a short, descriptive title for this transcription:\n\n{transcribed_text}"},
+                    {
+                        "type": "text",
+                        "text": (
+                            "Return exactly one short title (5–8 words) for the transcription below. "
+                            "Use the same language as the transcription. Do not include quotes, bullets, markdown, or any extra text. "
+                            "Output only the title on a single line.\n\n" + transcribed_text
+                        ),
+                    },
                 ]
             )
-            # Use sync path without internal async retries; run in a thread
-            title_response, key_index = await asyncio.to_thread(
-                providers.invoke_google, [title_message]
-            )
-            title_text = title_response.content.strip().replace('"', '')
-            usage.log_usage(
-                event="title",
-                provider="gemini",
-                model=config.GOOGLE_MODEL,
-                key_label=providers.key_label_from_index(key_index),
-                status="success",
-            )
-        except Exception as gerr:
-            if providers.should_google_fallback(gerr):
+            # Try Gemini briefly, else fallback to OpenAI title
+            gemini_ok = False
+            last_key_index = None
+            for attempt in range(2):
+                try:
+                    title_response, key_index = await asyncio.to_thread(
+                        providers.invoke_google, [title_message]
+                    )
+                    last_key_index = key_index
+                    title_text = providers.normalize_title_output(title_response.content)
+                    gemini_ok = True
+                    break
+                except Exception as ge:
+                    print(f"Gemini title attempt {attempt+1} failed for {base_filename}: {ge}")
+                    if providers.should_google_fallback(ge):
+                        break
+                    continue
+            if gemini_ok:
+                usage.log_usage(
+                    event="title",
+                    provider="gemini",
+                    model=config.GOOGLE_MODEL,
+                    key_label=providers.key_label_from_index(last_key_index or 0),
+                    status="success",
+                )
+            else:
+                raise RuntimeError("Gemini unavailable for title")
+        except Exception as e:
+            try:
+                print(f"Falling back to OpenAI title for {base_filename}: {e}")
                 title_text = providers.title_with_openai(transcribed_text)
                 usage.log_usage(
                     event="title",
@@ -326,21 +376,19 @@ async def transcribe_and_save(wav_path):
                     key_label=usage.OPENAI_LABEL,
                     status="success",
                 )
-            else:
-                raise gerr
+            except Exception:
+                title_text = "Title generation failed."
         print(f"Successfully generated title for {base_filename}.")
 
-        base_no_ext = base_filename[:-4] if base_filename.endswith('.wav') else base_filename
-        payload = note_store.build_note_payload(base_no_ext, title_text, transcribed_text)
-        note_store.save_note_json(base_no_ext, payload)
+        payload = note_store.build_note_payload(base_filename, title_text, transcribed_text)
+        note_store.save_note_json(os.path.splitext(base_filename)[0], payload)
         print(f"Successfully saved transcription and title for {base_filename}.")
 
     except Exception as e:
         print(f"Error during transcription/titling for {wav_path}: {e}")
         if os.path.exists(wav_path):
-            base_no_ext = base_filename[:-4] if base_filename.endswith('.wav') else base_filename
-            payload = note_store.build_note_payload(base_no_ext, "Title generation failed.", "Transcription failed.")
-            note_store.save_note_json(base_no_ext, payload)
+            payload = note_store.build_note_payload(base_filename, "Title generation failed.", "Transcription failed.")
+            note_store.save_note_json(os.path.splitext(base_filename)[0], payload)
 
 def _audio_length_seconds(path: str) -> float | None:
     try:
@@ -379,19 +427,30 @@ def get_notes():
     # Ensure transcripts dir exists (in case)
     os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
 
-    wav_files = [f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')]
+    AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
+    wav_files = [f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)]
     wav_files.sort(key=lambda f: os.path.getmtime(os.path.join(VOICE_NOTES_DIR, f)), reverse=True)
     for filename in wav_files:
         base_filename = filename[:-4]
+        audio_path = os.path.join(VOICE_NOTES_DIR, filename)
         data, transcription, title = note_store.load_note_json(base_filename)
         if data is None:
-            # Backward compatibility: legacy .txt
-            txt_path = os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.txt")
-            if os.path.exists(txt_path):
-                with open(txt_path, 'r') as f:
-                    transcription = f.read()
-            data = note_store.build_note_payload(base_filename, title or "", transcription or "")
-            note_store.save_note_json(base_filename, data)
+            # JSON not yet created (transcription pending). Return lightweight
+            # metadata without creating placeholder JSON to avoid overwriting
+            # the final payload when it arrives.
+            mtime = os.path.getmtime(audio_path)
+            date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+            length_sec = note_store.audio_length_seconds(audio_path)
+            notes.append({
+                "filename": filename,
+                "transcription": transcription,  # likely None
+                "title": title,  # likely None (frontend will fallback to filename)
+                "date": date_str,
+                "length_seconds": length_sec,
+                "topics": [],
+                "tags": [],
+            })
+            continue
         else:
             data = note_store.ensure_metadata_in_json(base_filename, data)
 

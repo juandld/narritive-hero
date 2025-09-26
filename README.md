@@ -51,7 +51,12 @@ This is the recommended way to run the project.
     OPENAI_API_KEY="your-openai-key"
 
     # Optional: override models
-    # GOOGLE_MODEL="gemini-1.5-flash"
+    # Default target is Gemini 2.5 Flash. You can specify human-friendly names
+    # (e.g., "gemini 2.5 flash" or "gemini-2.5-flash-002"); the backend
+    # normalizes spaces and strips explicit version suffixes.
+    # If you need an exact model id with no normalization, set GOOGLE_MODEL_EXACT.
+    # GOOGLE_MODEL="gemini 2.5 flash"
+    # GOOGLE_MODEL_EXACT="gemini-2.5-flash"
     # OPENAI_TRANSCRIBE_MODEL="whisper-1"
     # OPENAI_TITLE_MODEL="gpt-4o-mini"
     ```

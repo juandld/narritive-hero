@@ -155,16 +155,18 @@ async def on_startup():
         if f.endswith('.title'):
             consolidate_title_file(os.path.join(VOICE_NOTES_DIR, f))
 
-    wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')}
+    AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
+    wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)}
     json_files = {f for f in os.listdir(TRANSCRIPTS_DIR) if f.endswith('.json')}
     txt_files = {f for f in os.listdir(TRANSCRIPTS_DIR) if f.endswith('.txt')}
     # title_files no longer used; titles are consolidated into JSON
 
     tasks = []
     for wav_file in wav_files:
-        json_filename = wav_file.replace('.wav', '.json')
-        txt_filename = wav_file.replace('.wav', '.txt')
-        title_filename = wav_file.replace('.wav', '.title')
+        base = os.path.splitext(wav_file)[0]
+        json_filename = base + '.json'
+        txt_filename = base + '.txt'
+        title_filename = base + '.title'
         # Create combined JSON if missing, otherwise schedule (re)transcription as needed
         if json_filename not in json_files:
             # If we have legacy pieces, consolidate into JSON
@@ -233,9 +235,20 @@ async def on_startup():
                 wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
                 tasks.append(transcribe_and_save(wav_path))
         else:
-            # JSON exists: consider it complete and do not re-transcribe on startup.
-            # Users can delete the JSON to force reprocessing.
-            continue
+            # JSON exists. Re-transcribe only if it previously failed.
+            json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
+            try:
+                with open(json_path, 'r') as jf:
+                    data = json.load(jf)
+                if data.get('transcription') == 'Transcription failed.':
+                    wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
+                    tasks.append(transcribe_and_save(wav_path))
+                else:
+                    continue
+            except Exception:
+                # If unreadable, try to regenerate
+                wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
+                tasks.append(transcribe_and_save(wav_path))
 
     if tasks:
         print(f"Found {len(tasks)} notes to transcribe/title.")
