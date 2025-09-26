@@ -34,6 +34,11 @@ transcriptions/*
 !transcriptions/.gitkeep
 
 
+# Exclude all contents of narratives folder, but keep the folder
+narratives/*
+!narratives/.gitkeep
+
+
 # Python cache files
 __pycache__/
 *.py[cod]
