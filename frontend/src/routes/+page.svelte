@@ -6,31 +6,94 @@
   import NotesList from '../lib/components/NotesList.svelte';
   import FileUpload from '../lib/components/FileUpload.svelte';
   import NarrativesDrawer from '../lib/components/NarrativesDrawer.svelte';
+  import NarrativeGenerateModal from '../lib/components/NarrativeGenerateModal.svelte';
 
   type Note = {
     filename: string;
     transcription?: string;
     title?: string;
+    date?: string; // YYYY-MM-DD
+    length_seconds?: number;
+    topics?: string[];
   };
 
   let isRecording = false;
   let mediaRecorder: MediaRecorder | null = null;
   let audioChunks: Blob[] = [];
   let notes: Note[] = [];
+  let filteredNotes: Note[] = [];
   let expandedNotes: Set<string> = new Set();
   let selectedNotes: Set<string> = new Set();
   let toastMessage = '';
   let showToast = false;
   let isUploading = false;
+  let isBulkDeleting = false;
+  // Multi-file upload progress
+  let multiUploadActive = false;
+  let multiUploadTotal = 0;
+  let multiUploadIndex = 0;
+  $: multiUploadPercent = multiUploadTotal ? Math.floor((multiUploadIndex / multiUploadTotal) * 100) : 0;
 
   let isNarrativesDrawerOpen = false;
+  let initialNarrativeSelect: string | null = null;
+  let isNarrativeModalOpen = false;
+  let isGeneratingNarrative = false;
 
   let includeDate: boolean = true;
   let includePlace: boolean = false;
   let detectedPlace: string = '';
   let showPlacePrompt: boolean = false;
 
-  const BACKEND_URL = 'http://localhost:8000';
+  import { BACKEND_URL } from '../lib/config';
+
+  // Filters moved to FiltersBar component
+  import FiltersBar, { type Filters } from '../lib/components/FiltersBar.svelte';
+  import BulkActions from '../lib/components/BulkActions.svelte';
+  let filters: Filters = { dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '' };
+
+  function applyFilters() {
+    const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
+    const to = filters.dateTo ? new Date(filters.dateTo) : null;
+    const topicTokens = filters.topics
+      .toLowerCase()
+      .split(/[ ,]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const minLen = typeof filters.minLen === 'number' ? filters.minLen : null;
+    const maxLen = typeof filters.maxLen === 'number' ? filters.maxLen : null;
+    const q = filters.search.trim().toLowerCase();
+
+    filteredNotes = notes.filter((n) => {
+      // Date filter
+      if (from || to) {
+        if (!n.date) return false;
+        const d = new Date(n.date);
+        if (from && d < from) return false;
+        if (to) {
+          const end = new Date(to);
+          end.setHours(23, 59, 59, 999);
+          if (d > end) return false;
+        }
+      }
+      // Topics filter (any match)
+      if (topicTokens.length) {
+        const noteTopics = (n.topics || []).map((t) => t.toLowerCase());
+        const hasAny = topicTokens.some((t) => noteTopics.includes(t));
+        if (!hasAny) return false;
+      }
+      // Length filter
+      if (minLen !== null && (n.length_seconds ?? 0) < minLen) return false;
+      if (maxLen !== null && (n.length_seconds ?? 0) > maxLen) return false;
+      // Text search across title + transcription
+      if (q) {
+        const hay = `${n.title ?? ''} ${n.transcription ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  // Reset handled by FiltersBar
 
   function toggleExpand(filename: string) {
     if (expandedNotes.has(filename)) {
@@ -51,39 +114,44 @@
     selectedNotes = new Set(selectedNotes);
   }
 
-  async function createNarrative() {
-    const selectedNotesArray = Array.from(selectedNotes).map((filename) => ({
-      filename
-    }));
+  function createNarrative() {
+    isNarrativeModalOpen = true;
+  }
 
+  async function submitNarrativeGeneration(e: CustomEvent<{ extra_text: string; provider: string; model: string; temperature: number }>) {
+    const selectedNotesArray = Array.from(selectedNotes).map((filename) => ({ filename }));
+    const { extra_text, provider, model, temperature } = e.detail;
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives`, {
+      isGeneratingNarrative = true;
+      const response = await fetch(`${BACKEND_URL}/api/narratives/generate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(selectedNotesArray)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: selectedNotesArray, extra_text, provider, model: model || undefined, temperature })
       });
-
       if (response.ok) {
+        const data = await response.json();
+        const fname = data?.filename as string | undefined;
         toastMessage = 'Narrative created successfully!';
         showToast = true;
-        setTimeout(() => {
-          showToast = false;
-        }, 3000);
+        setTimeout(() => { showToast = false; }, 3000);
         selectedNotes.clear();
         selectedNotes = new Set(selectedNotes);
-        isNarrativesDrawerOpen = true; // Open the drawer to show the new narrative
+        initialNarrativeSelect = fname || null;
+        isNarrativesDrawerOpen = true;
+        isNarrativeModalOpen = false;
       } else {
         console.error('Failed to create narrative');
         toastMessage = 'Failed to create narrative.';
         showToast = true;
-        setTimeout(() => {
-          showToast = false;
-        }, 3000);
+        setTimeout(() => { showToast = false; }, 3000);
       }
     } catch (error) {
       console.error('Error creating narrative:', error);
+      toastMessage = 'Error creating narrative.';
+      showToast = true;
+      setTimeout(() => { showToast = false; }, 3000);
+    } finally {
+      isGeneratingNarrative = false;
     }
   }
 
@@ -111,6 +179,7 @@
       const response = await fetch(`${BACKEND_URL}/api/notes`);
       if (response.ok) {
         notes = await response.json();
+        applyFilters();
       } else {
         console.error('Failed to fetch notes:', response.statusText);
       }
@@ -182,7 +251,7 @@
     }
   }
 
-  async function uploadRecording(blob: Blob) {
+  async function uploadRecording(blob: Blob, skipPoll: boolean = false) {
     const formData = new FormData();
     formData.append('file', blob, 'recording.wav');
     if (includeDate) {
@@ -201,31 +270,35 @@
       if (response.ok) {
         const newNote = await response.json();
         console.log('Upload successful, starting to poll for transcription for', newNote.filename);
-
-        // Poll for transcription
-        const poll = async () => {
+        if (skipPoll) {
+          // Quick refresh only; batch handler will keep refreshing the list
           await getNotes();
-          const note = notes.find((n) => n.filename === newNote.filename);
+        } else {
+          // Poll for transcription
+          const poll = async () => {
+            await getNotes();
+            const note = notes.find((n) => n.filename === newNote.filename);
 
-          // Stop polling if the transcription is present (either success or a failure message)
-          if (note && note.transcription) {
-            isUploading = false;
-            if (note.transcription === 'Transcription failed.') {
-              console.error('Transcription failed for', newNote.filename);
-              toastMessage = 'Transcription failed. Please try again.';
-              showToast = true;
-              setTimeout(() => {
-                showToast = false;
-              }, 3000);
+            // Stop polling if the transcription is present (either success or a failure message)
+            if (note && note.transcription) {
+              isUploading = false;
+              if (note.transcription === 'Transcription failed.') {
+                console.error('Transcription failed for', newNote.filename);
+                toastMessage = 'Transcription failed. Please try again.';
+                showToast = true;
+                setTimeout(() => {
+                  showToast = false;
+                }, 3000);
+              } else {
+                console.log('Transcription complete for', newNote.filename);
+              }
             } else {
-              console.log('Transcription complete for', newNote.filename);
+              // If transcription is not yet present, poll again
+              setTimeout(poll, 2000);
             }
-          } else {
-            // If transcription is not yet present, poll again
-            setTimeout(poll, 2000);
-          }
-        };
-        poll(); // Start the first poll
+          };
+          poll();
+        }
       } else {
         console.error('Upload failed');
         isUploading = false;
@@ -256,6 +329,44 @@
     }
   }
 
+  async function deleteSelectedNotes() {
+    if (selectedNotes.size === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${selectedNotes.size} selected note(s)? This removes audio, transcription, and title files.`
+    );
+    if (!confirmed) return;
+    isBulkDeleting = true;
+    try {
+      const filenames = Array.from(selectedNotes);
+      const results = await Promise.allSettled(
+        filenames.map((filename) =>
+          fetch(`${BACKEND_URL}/api/notes/${filename}`, { method: 'DELETE' })
+        )
+      );
+      const successCount = results.filter(
+        (r) => r.status === 'fulfilled' && (r as PromiseFulfilledResult<Response>).value.ok
+      ).length;
+      const failCount = results.length - successCount;
+      await getNotes();
+      selectedNotes.clear();
+      selectedNotes = new Set(selectedNotes);
+      toastMessage = `Deleted ${successCount} note(s)` + (failCount ? `, ${failCount} failed` : '');
+      showToast = true;
+      setTimeout(() => {
+        showToast = false;
+      }, 3000);
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      toastMessage = 'Failed to delete selected notes.';
+      showToast = true;
+      setTimeout(() => {
+        showToast = false;
+      }, 3000);
+    } finally {
+      isBulkDeleting = false;
+    }
+  }
+
   function handlePlacePromptResponse(event: CustomEvent<boolean>) {
     includePlace = event.detail;
     showPlacePrompt = false;
@@ -265,6 +376,23 @@
     const file = event.detail;
     await uploadRecording(file);
   }
+  // Periodic refresh window for batch uploads
+  let batchRefreshTimer: number | null = null;
+  function startBatchRefreshWindow(ms = 30000) {
+    if (batchRefreshTimer) {
+      clearInterval(batchRefreshTimer);
+      batchRefreshTimer = null;
+    }
+    const started = Date.now();
+    batchRefreshTimer = setInterval(async () => {
+      await getNotes();
+      if (Date.now() - started > ms) {
+        if (batchRefreshTimer) clearInterval(batchRefreshTimer);
+        batchRefreshTimer = null;
+      }
+    }, 2000) as unknown as number;
+  }
+
 </script>
 
 <main style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem;">
@@ -273,7 +401,24 @@
   <h1 style="text-align: center;">Narrative Hero</h1>
 
   <div class="controls-container">
-    <FileUpload on:file-selected={handleFileSelected} />
+    <FileUpload on:files-selected={async (e) => {
+      const files: File[] = e.detail;
+      if (!files || files.length === 0) return;
+      multiUploadActive = true;
+      multiUploadTotal = files.length;
+      multiUploadIndex = 0;
+      for (const f of files) {
+        multiUploadIndex += 1;
+        await uploadRecording(f, true);
+      }
+      startBatchRefreshWindow(30000);
+      // slight delay to let the last polling settle
+      setTimeout(() => {
+        multiUploadActive = false;
+        multiUploadTotal = 0;
+        multiUploadIndex = 0;
+      }, 300);
+    }} />
     <button class="narrative-button" on:click={() => (isNarrativesDrawerOpen = true)}>View Narratives</button>
   </div>
 
@@ -289,12 +434,20 @@
     <PlacePrompt {detectedPlace} on:response={handlePlacePromptResponse} />
   {/if}
 
-  {#if isUploading}
+  {#if multiUploadActive}
+    <div class="bulk-upload-indicator">
+      Uploading {multiUploadIndex} / {multiUploadTotal}…
+      <div class="progress"><div class="bar" style="width: {multiUploadPercent}%"></div></div>
+    </div>
+  {:else if isUploading}
     <div class="loading-indicator">Processing your note, please wait...</div>
   {/if}
 
+  <FiltersBar bind:filters on:change={(e) => { filters = e.detail; applyFilters(); }} counts={{ total: notes.length, filtered: filteredNotes.length }} />
+  <!-- legacy filters markup removed -->
+
   <NotesList
-    {notes}
+    notes={filteredNotes}
     {expandedNotes}
     {selectedNotes}
     on:toggle={(e) => toggleExpand(e.detail)}
@@ -303,14 +456,17 @@
     on:select={handleSelectNote}
   />
 
-  {#if selectedNotes.size > 0}
-    <button class="create-narrative-button" on:click={createNarrative}>
-      Create Narrative from {selectedNotes.size} note(s)
-    </button>
-  {/if}
+  <BulkActions selectedCount={selectedNotes.size} {isBulkDeleting} on:deleteSelected={deleteSelectedNotes} on:createNarrative={createNarrative} />
 </main>
 
-<NarrativesDrawer isOpen={isNarrativesDrawerOpen} onClose={() => (isNarrativesDrawerOpen = false)} />
+<NarrativesDrawer isOpen={isNarrativesDrawerOpen} initialSelect={initialNarrativeSelect} onClose={() => (isNarrativesDrawerOpen = false)} />
+<NarrativeGenerateModal
+  open={isNarrativeModalOpen}
+  selected={Array.from(selectedNotes)}
+  loading={isGeneratingNarrative}
+  on:close={() => (isNarrativeModalOpen = false)}
+  on:generate={submitNarrativeGeneration}
+/>
 
 <style>
   main {
@@ -336,21 +492,6 @@
     cursor: pointer;
   }
 
-  .create-narrative-button {
-    position: fixed;
-    bottom: 2rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: #28a745;
-    color: white;
-    border: none;
-    padding: 1rem 2rem;
-    border-radius: 50px;
-    cursor: pointer;
-    font-size: 1.2rem;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  }
-
   .loading-indicator {
     background-color: #f0f0f0;
     padding: 1rem;
@@ -358,4 +499,15 @@
     border-radius: 5px;
     text-align: center;
   }
+  .bulk-upload-indicator {
+    background-color: #f0f0f0;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 5px;
+    text-align: center;
+  }
+  .progress { height: 8px; background:#e5e7eb; border-radius: 9999px; margin-top: 8px; overflow:hidden; }
+  .bar { height: 100%; background:#3B82F6; width: 0; transition: width 0.2s ease; }
+
+  /* Filters moved to FiltersBar component */
 </style>

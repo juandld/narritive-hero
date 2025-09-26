@@ -1,57 +1,86 @@
 import os
+import json
+import shutil
 import asyncio
+import wave
+import contextlib
+from datetime import datetime
 from services import transcribe_and_save
 import usage_log as usage
+import config
 
-APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VOICE_NOTES_DIR = os.path.join(APP_DIR, "voice_notes")
+# Centralized paths; keep module vars for monkeypatching in tests
+APP_DIR = config.BASE_DIR
+VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
+TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 
 async def on_startup():
     """On startup, create voice notes dir and backfill any missing transcriptions."""
     if not os.path.exists(VOICE_NOTES_DIR):
         os.makedirs(VOICE_NOTES_DIR)
+    if not os.path.exists(TRANSCRIPTS_DIR):
+        os.makedirs(TRANSCRIPTS_DIR)
+    # Ensure narratives dir exists under storage
+    try:
+        import config as _cfg
+        NARRATIVES_DIR = getattr(_cfg, "NARRATIVES_DIR", os.path.join(APP_DIR, "storage", "narratives"))
+    except Exception:
+        NARRATIVES_DIR = os.path.join(APP_DIR, "storage", "narratives")
+    if not os.path.exists(NARRATIVES_DIR):
+        os.makedirs(NARRATIVES_DIR)
+    # titles directory is deprecated; we will migrate any leftover files below
     # Ensure usage logging directory/files exist
     usage.ensure_usage_paths()
     
     print("Checking for missing transcriptions...")
-    wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.wav')}
-    txt_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.txt')}
-    title_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.endswith('.title')}
+    # Legacy consolidation disabled: only JSON is considered
+
+    AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
+    wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)}
+    json_files = {f for f in os.listdir(TRANSCRIPTS_DIR) if f.endswith('.json')}
+    # Ignore any legacy .txt/.title files
 
     tasks = []
     for wav_file in wav_files:
-        txt_filename = wav_file.replace('.wav', '.txt')
-        title_filename = wav_file.replace('.wav', '.title')
-        if txt_filename not in txt_files or title_filename not in title_files:
+        base = os.path.splitext(wav_file)[0]
+        json_filename = base + '.json'
+        # If JSON missing, schedule transcription/title generation
+        if json_filename not in json_files:
             wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
             tasks.append(transcribe_and_save(wav_path))
         else:
-            # Check if the transcription failed
-            transcription_path = os.path.join(VOICE_NOTES_DIR, txt_filename)
-            if os.path.exists(transcription_path):
-                with open(transcription_path, 'r') as f:
-                    transcription = f.read()
-                if transcription == "Transcription failed.":
+            # JSON exists. Re-transcribe only if it previously failed.
+            json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
+            try:
+                with open(json_path, 'r') as jf:
+                    data = json.load(jf)
+                if data.get('transcription') == 'Transcription failed.':
                     wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
                     tasks.append(transcribe_and_save(wav_path))
-            
-            # Check if title generation failed
-            title_path = os.path.join(VOICE_NOTES_DIR, title_filename)
-            if os.path.exists(title_path):
-                with open(title_path, 'r') as f:
-                    title_content = f.read()
-                if title_content == "Title generation failed.":
-                    wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
-                    tasks.append(transcribe_and_save(wav_path))
+                else:
+                    continue
+            except Exception:
+                # If unreadable, try to regenerate
+                wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
+                tasks.append(transcribe_and_save(wav_path))
 
     if tasks:
         print(f"Found {len(tasks)} notes to transcribe/title.")
-        try:
-            await asyncio.gather(*tasks)
-        except Exception as e:
-            if "429" in str(e):
-                print("Google API quota exceeded. Please upgrade your plan.")
-            else:
-                print(f"An error occurred during startup transcription/title generation: {e}")
+        # Run in background so app startup is not blocked
+        async def _runner(tsk_list):
+            try:
+                # Limit concurrency to avoid API thrashing
+                sem = asyncio.Semaphore(3)
+                async def _wrap(coro):
+                    async with sem:
+                        return await coro
+                await asyncio.gather(*[_wrap(t) for t in tsk_list])
+                print("Background transcription/title generation complete.")
+            except Exception as e:
+                if "429" in str(e):
+                    print("Google API quota exceeded. Background tasks paused.")
+                else:
+                    print(f"An error occurred during background transcription/title generation: {e}")
+        asyncio.create_task(_runner(tasks))
     else:
         print("No missing transcriptions/titles found.")

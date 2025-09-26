@@ -8,11 +8,12 @@
 
   export let isOpen: boolean;
   export let onClose: () => void;
+  export let initialSelect: string | null = null;
 
   let narratives: Narrative[] = [];
   let selectedNarrative: Narrative | null = null;
 
-  const BACKEND_URL = 'http://localhost:8000';
+  import { BACKEND_URL } from '../config';
 
   async function getNarratives() {
     try {
@@ -68,10 +69,15 @@
   $: if (isOpen) {
     getNarratives();
   }
+
+  // If parent provides an initial filename to select, fetch its content when open
+  $: if (isOpen && initialSelect) {
+    getNarrativeContent(initialSelect);
+  }
 </script>
 
+<div class="drawer-overlay" class:is-open={isOpen} role="button" tabindex="0" on:click={onClose} on:keydown={(e) => (e.key==='Enter'||e.key===' ') && onClose()}></div>
 <div class="drawer" class:is-open={isOpen}>
-  <div class="drawer-overlay" on:click={onClose}></div>
   <div class="drawer-content">
     <div class="drawer-header">
       <h2>Narratives</h2>
@@ -80,7 +86,7 @@
     <div class="drawer-body">
       <div class="narrative-list">
         {#each narratives as narrative}
-          <div class="narrative-item" on:click={() => getNarrativeContent(narrative.filename)}>
+          <div class="narrative-item" role="button" tabindex="0" on:click={() => getNarrativeContent(narrative.filename)} on:keydown={(e) => (e.key==='Enter'||e.key===' ') && getNarrativeContent(narrative.filename)}>
             {narrative.filename}
           </div>
         {/each}
@@ -123,12 +129,9 @@
     height: 100%;
     background-color: rgba(0, 0, 0, 0.5);
     z-index: 999;
-    display: none;
+    display: none; /* shown when drawer is open */
   }
-
-  .drawer.is-open + .drawer-overlay {
-    display: block;
-  }
+  .drawer-overlay.is-open { display: block; }
 
   .drawer-content {
     padding: 1rem;

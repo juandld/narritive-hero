@@ -6,7 +6,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./voice_notes:/app/voice_notes
+      - ./storage/voice_notes:/app/storage/voice_notes
+      - ./storage/transcriptions:/app/storage/transcriptions
+      - ./storage/narratives:/app/storage/narratives
 
   frontend:
     build: ./frontend

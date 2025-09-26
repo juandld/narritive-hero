@@ -29,6 +29,16 @@ Thumbs.db
 voice_notes/*
 !voice_notes/.gitkeep
 
+# Exclude all contents of transcriptions folder, but keep the folder
+transcriptions/*
+!transcriptions/.gitkeep
+
+
+# Exclude all contents of narratives folder, but keep the folder
+narratives/*
+!narratives/.gitkeep
+
+
 # Python cache files
 __pycache__/
 *.py[cod]
