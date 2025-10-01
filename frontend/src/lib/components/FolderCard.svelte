@@ -45,7 +45,7 @@
     <p class="title">{name}</p>
     <div class="right">
       <small class="meta">{count} {count === 1 ? 'note' : 'notes'}</small>
-      <button class="del" title="Delete folder" aria-label="Delete folder" on:click={() => dispatch('delete', { name })}>×</button>
+      <button class="del" title="Delete folder" aria-label="Delete folder" on:click|stopPropagation={() => dispatch('delete', { name })}>×</button>
     </div>
   </div>
   <div class="folder-body">

@@ -20,6 +20,8 @@
 
   import { BACKEND_URL } from '../config';
   import AudioPlayer from './AudioPlayer.svelte';
+  import ColorPalette from '$lib/components/common/ColorPalette.svelte';
+  import { createDragGhost } from '$lib/utils/dnd';
 
   // Tag editing state
   let newTagLabel: string = '';
@@ -35,6 +37,8 @@
   // Default to last used color from localStorage, otherwise Violet
   let newTagColor: string = (typeof localStorage !== 'undefined' && localStorage.getItem('lastTagColor')) || TAG_COLORS[4].value;
   let showPalette = false;
+  let showTagEditor = false; // allow tags editor in compact view via toggle
+  let editingTagIndex: number | null = null;
 
   async function addTag() {
     const label = newTagLabel.trim();
@@ -48,6 +52,25 @@
   async function removeTag(idx: number) {
     const tags = (note.tags || []).filter((_, i) => i !== idx);
     await saveTags(tags);
+  }
+
+  async function changeTagColor(idx: number, color: string) {
+    const tags = (note.tags || []).map((t, i) => i === idx ? { ...t, color } : t);
+    await saveTags(tags);
+    editingTagIndex = null;
+  }
+
+  let editingTagLabel = '';
+  function beginRename(idx: number) {
+    editingTagIndex = idx;
+    editingTagLabel = (note.tags?.[idx]?.label || '').trim();
+  }
+  async function saveTagLabel(idx: number) {
+    const label = editingTagLabel.trim();
+    if (!label) return;
+    const tags = (note.tags || []).map((t, i) => i === idx ? { ...t, label } : t);
+    await saveTags(tags);
+    editingTagIndex = null;
   }
 
   async function saveTags(tags: { label: string; color?: string }[]) {
@@ -119,11 +142,8 @@
       e.dataTransfer?.setData('application/json', JSON.stringify(payload));
       // Custom drag image with count
       const count = filenames.length;
-      const ghost = document.createElement('div');
-      ghost.style.cssText = 'position:fixed; top:-1000px; left:-1000px; padding:6px 10px; background:#111; color:#fff; border-radius:9999px; font-size:12px;';
-      ghost.textContent = count > 1 ? `${count} notes` : `1 note`;
-      document.body.appendChild(ghost);
-      e.dataTransfer?.setDragImage(ghost, 10, 10);
+      const ghost = createDragGhost(count > 1 ? `${count} notes` : `1 note`, '🎵');
+      e.dataTransfer?.setDragImage(ghost, 24, 24);
       setTimeout(()=>{ try{ document.body.removeChild(ghost); }catch{} }, 0);
       document.body.classList.add('dragging-notes');
     }catch{}
@@ -132,35 +152,45 @@
   on:mousedown={(e)=>{ if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }} on:click={onCardClick} on:keydown={onCardKey} aria-selected={selected} tabindex="0">
   <div class="header">
     <p class="title">{note.title || note.filename.replace(/\.\w+$/i,'')}</p>
-    <small class="meta">{note.date}{#if note.length_seconds} • {note.length_seconds}s{/if}</small>
+    <div class="tools">
+      <button class="mini" title="Edit tags" aria-label="Edit tags" on:click|stopPropagation={() => (showTagEditor = !showTagEditor)}>
+        🏷️
+      </button>
+      <small class="meta">{note.date}{#if note.length_seconds} • {note.length_seconds}s{/if}</small>
+    </div>
   </div>
   <div class="chips">
     {#if note.topics && note.topics.length}
       {#each note.topics as t}
-        <span class="topic">{t}</span>
+        <span class="topic" title="AI tag">{t}</span>
       {/each}
     {/if}
     {#if note.tags && note.tags.length}
       {#each note.tags as t, i}
-        <span class="tag" style="background:{t.color || '#6B7280'};">
+        <span class="tag" style="background:{t.color || '#6B7280'};" on:click|stopPropagation={() => beginRename(i)}>
           {t.label}
           <button aria-label="Remove tag" on:click|stopPropagation={() => removeTag(i)} class="tag-x">×</button>
         </span>
+        {#if editingTagIndex === i}
+          <div class="tag-inline-editor" on:click|stopPropagation>
+            <input class="rename" bind:value={editingTagLabel} on:keydown={(e)=>{ if(e.key==='Enter'){ saveTagLabel(i); } }} />
+            <ColorPalette colors={TAG_COLORS} selected={(t.color||'')} size="small" ariaLabel="Pick tag color" onPick={(v)=>changeTagColor(i, v)} />
+            <button class="mini" on:click={() => saveTagLabel(i)}>Save</button>
+            <button class="mini" on:click={() => (editingTagIndex = null)}>Cancel</button>
+          </div>
+        {/if}
       {/each}
     {/if}
-  </div>
-
-  <div class="tag-editor" class:hide={variant==='compact'}>
-    <input aria-label="New tag" placeholder="Add tag" bind:value={newTagLabel} on:click|stopPropagation on:mousedown|stopPropagation />
-    <button type="button" aria-label="Selected color" class="color" on:click|stopPropagation={() => (showPalette = !showPalette)} style="background:{newTagColor};"></button>
-    {#if showPalette}
-      <div class="palette" on:click|stopPropagation>
-        {#each TAG_COLORS as c}
-          <button type="button" title={c.label} aria-label={c.label} on:click={() => selectColor(c.value)} style="background:{c.value}; border-color:{newTagColor===c.value ? '#111' : '#fff'}"></button>
-        {/each}
+    <!-- Inline add tag chip -->
+    <button class="add-chip" on:click|stopPropagation={() => (showTagEditor = !showTagEditor)} aria-expanded={showTagEditor}>+ Tag</button>
+    {#if showTagEditor}
+      <div class="tag-inline-editor" on:click|stopPropagation>
+        <input class="rename" placeholder="New tag" bind:value={newTagLabel} on:keydown={(e)=>{ if(e.key==='Enter'){ addTag(); } }} />
+        <ColorPalette colors={TAG_COLORS} selected={newTagColor} size="small" ariaLabel="Pick tag color" onPick={(v)=>selectColor(v)} />
+        <button class="mini" on:click={addTag}>Add</button>
+        <button class="mini" on:click={() => { showTagEditor = false; newTagLabel=''; }}>Cancel</button>
       </div>
     {/if}
-    <button on:click|stopPropagation={addTag} class="add">Add</button>
   </div>
   <AudioPlayer
     src={`${BACKEND_URL}/voice_notes/${note.filename}`}
@@ -197,16 +227,19 @@
   .title { margin:0; font-weight: 600; font-size: 1rem; }
   .card.compact .title { font-size: .95rem; }
   .meta { color:#666; }
+  .tools { display:flex; align-items:center; gap:.35rem; }
+  .mini { border:1px solid #e5e7eb; background:#fff; color:#374151; border-radius:6px; padding:.15rem .4rem; cursor:pointer; font-size:.85rem; }
   .chips { margin: .25rem 0 .5rem 0; display:flex; gap:.35rem; flex-wrap: wrap; }
-  .topic { background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:12px; font-size:.75rem; }
-  .tag { color:#fff; padding:2px 8px; border-radius:12px; font-size:.75rem; display:inline-flex; align-items:center; gap:6px; }
+  .topic { background:#e8f0fe; color:#1a73e8; padding:2px 10px; border-radius:9999px; font-size:.75rem; }
+  .tag { color:#fff; padding:2px 10px; border-radius:9999px; font-size:.75rem; display:inline-flex; align-items:center; gap:6px; }
   .tag .tag-x { background:none; border:none; cursor:pointer; color:#fff; }
-  .tag-editor { display:flex; gap:.5rem; align-items:center; margin-bottom:.5rem; flex-wrap: wrap; position: relative; }
-  .tag-editor.hide { display:none; }
-  .tag-editor input { flex: 0 1 220px; width: 220px; min-width: 140px; padding:.35rem .5rem; border:1px solid #e5e7eb; border-radius:6px; }
-  .tag-editor .color { width:26px; height:26px; border-radius:50%; border:2px solid #111; cursor:pointer; }
-  .tag-editor .palette { position:absolute; right:64px; bottom:40px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px; display:flex; gap:6px; box-shadow:0 10px 20px rgba(0,0,0,0.08); }
-  .tag-editor .palette button { width:22px; height:22px; border-radius:50%; border:2px solid #fff; cursor:pointer; }
+  .add-chip { background:#fff; color:#374151; border:1px solid #e5e7eb; border-radius:9999px; padding:2px 10px; cursor:pointer; }
+  .tag-inline-editor { display:inline-flex; align-items:center; gap:.35rem; margin-left:.25rem; flex-wrap: wrap; }
+  .tag-inline-editor .rename { flex:0 1 200px; border:1px solid #e5e7eb; border-radius:6px; padding:.3rem .45rem; }
+  .palette.small { position: static; display:inline-flex; margin: 4px 0 8px 0; padding:6px; border-radius:9999px; background:#fff; border:1px solid #e5e7eb; gap:6px; }
+  .palette.small button { width:34px; height:18px; border-radius:9999px; border:2px solid #fff; cursor:pointer; }
+  .palette.small button.selected { border-color:#111; box-shadow: 0 0 0 1px #111 inset; }
+  .palette.small button:focus-visible { outline:2px solid #111; outline-offset:2px; }
   /* custom audio player replaces native controls */
   .text { background-color:#fff; padding:.5rem 1rem; border-left:5px solid #4285f4; margin:0; border-radius:4px; }
   .text p { margin: .25rem 0; }

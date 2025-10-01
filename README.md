@@ -222,6 +222,24 @@ Open API docs: visit `http://localhost:8000/docs`.
 
 Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container.
 
+## Frontend Unused Code
+
+The following frontend components/exports appear unused based on a static search of imports/references in `frontend/src`.
+
+- Components
+  - `frontend/src/lib/components/FileUpload.svelte` — superseded by the Topbar upload button and `pageDrop` action.
+  - `frontend/src/lib/components/FolderSidebar.svelte` — replaced by folder chips/cards within `NotesList.svelte`.
+  - `frontend/src/lib/components/RecordingControls.svelte` — replaced by `Topbar.svelte` and `uiApp` store actions.
+- Unused exports (safe to keep, but not referenced)
+  - `frontend/src/lib/services/appActions.ts: deleteNotes`
+  - `frontend/src/lib/stores/notes.ts: notesActions.refresh`
+  - `frontend/src/lib/stores/folders.ts: folderActions.refresh`
+
+Notes
+- Detection method: searched for import/use of each file and exported symbol via ripgrep across `frontend/src`.
+- Caveat: if any usage occurs dynamically (e.g., via code-splitting or string-based imports), it wouldn’t be caught by this heuristic. None were observed in this codebase.
+- Next step: if you agree, I can remove these files/exports in a follow-up cleanup PR.
+
 ## LangHero (separate app)
 
 - The previous experimental "Learn" route has been split out into its own project: `langhero`.

@@ -326,6 +326,3 @@
   .fmt { display:flex; align-items:center; gap:.4rem; font-size:.95rem; }
   .empty { color:#6b7280; font-size:.9rem; }
 </style>
-  // If user selected text in the drawer, default to focusing on it
-  type Scope = 'whole' | 'focus' | 'section';
-  let scope: Scope = selectedExcerpt ? 'focus' : 'whole';

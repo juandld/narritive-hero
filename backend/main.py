@@ -583,16 +583,18 @@ async def create_folder(request: Request):
 
 @app.delete("/api/folders/{name}")
 async def delete_folder(name: str):
-    """Delete a folder and clear it from any notes using it."""
+    """Delete a folder and PERMANENTLY DELETE all notes inside it.
+
+    Removes the folder from the registry and deletes corresponding audio files
+    and transcription JSONs for notes assigned to that folder.
+    """
     try:
         clean = (name or "").strip()
         reg = _load_folders_registry()
-        if clean in reg:
-            reg = [n for n in reg if n != clean]
-            _save_folders_registry(reg)
-        # Clear from notes
-        cleared = 0
-        for fn in os.listdir(TRANSCRIPTS_DIR):
+        # Delete notes in this folder
+        deleted_notes = 0
+        import note_store as _ns
+        for fn in list(os.listdir(TRANSCRIPTS_DIR)):
             if not fn.endswith('.json'):
                 continue
             jp = os.path.join(TRANSCRIPTS_DIR, fn)
@@ -600,13 +602,27 @@ async def delete_folder(name: str):
                 with open(jp, 'r') as f:
                     data = json.load(f)
                 if (data.get('folder') or '').strip() == clean:
-                    data['folder'] = ""
-                    with open(jp, 'w') as f:
-                        json.dump(data, f, ensure_ascii=False)
-                    cleared += 1
+                    base = os.path.splitext(fn)[0]
+                    # locate audio
+                    ap = None
+                    try:
+                        ap = _ns._find_audio_path(base, data)
+                    except Exception:
+                        ap = None
+                    # delete files
+                    if ap and os.path.exists(ap):
+                        try: os.remove(ap)
+                        except Exception: pass
+                    try: os.remove(jp)
+                    except Exception: pass
+                    deleted_notes += 1
             except Exception:
                 continue
-        return {"deleted": clean, "cleared": cleared}
+        # Remove folder from registry
+        if clean in reg:
+            reg = [n for n in reg if n != clean]
+            _save_folders_registry(reg)
+        return {"deleted": clean, "notes_deleted": deleted_notes}
     except Exception as e:
         return {"error": str(e)}
 

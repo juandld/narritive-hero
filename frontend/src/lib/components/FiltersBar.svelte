@@ -1,15 +1,7 @@
 <script lang="ts">
   // Compact, reusable filter bar. Emits a 'change' event with the current filters.
   import { createEventDispatcher } from 'svelte';
-
-  export type Filters = {
-    dateFrom: string;
-    dateTo: string;
-    topics: string;
-    minLen: number | '';
-    maxLen: number | '';
-    search: string;
-  };
+  import type { Filters } from '$lib/stores/filters';
 
   export let filters: Filters = {
     dateFrom: '',
@@ -27,8 +19,6 @@
 
   const dispatch = createEventDispatcher();
   function emit() {
-    // Debug log emitted filters
-    console.log('[FiltersBar] emit', JSON.stringify(local));
     dispatch('change', { ...local });
   }
   function selectAll() { dispatch('selectAll'); }
