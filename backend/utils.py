@@ -28,6 +28,12 @@ async def on_startup():
         NARRATIVES_DIR = os.path.join(APP_DIR, "storage", "narratives")
     if not os.path.exists(NARRATIVES_DIR):
         os.makedirs(NARRATIVES_DIR)
+    # Ensure formats dir exists
+    try:
+        from config import FORMATS_DIR as _FORMATS_DIR
+        os.makedirs(_FORMATS_DIR, exist_ok=True)
+    except Exception:
+        pass
     # titles directory is deprecated; we will migrate any leftover files below
     # Ensure usage logging directory/files exist
     usage.ensure_usage_paths()

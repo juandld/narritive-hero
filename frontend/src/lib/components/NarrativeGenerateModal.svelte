@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { BACKEND_URL } from '../config';
 
   export let open: boolean = false;
   export let selected: string[] = [];
@@ -12,6 +13,13 @@
   let model = '';
   let temperature = 0.2;
 
+  // Formats
+  type Format = { id: string; title: string; prompt: string };
+  let formats: Format[] = [];
+  let format_ids: string[] = [];
+  async function loadFormats(){ try{ const r = await fetch(`${BACKEND_URL}/api/formats`); if(r.ok) formats = await r.json(); }catch{} }
+  $: if (open) loadFormats();
+
   function close() {
     if (loading) return;
     dispatch('close');
@@ -19,7 +27,7 @@
 
   async function submit() {
     if (loading) return;
-    dispatch('generate', { extra_text, provider, model: model.trim(), temperature });
+    dispatch('generate', { extra_text, provider, model: model.trim(), temperature, format_ids });
   }
 </script>
 
@@ -34,6 +42,22 @@
     </div>
     <div class="modal-body">
       <p style="margin:0 0 .5rem 0; color:#6b7280;">{selected.length} note(s) selected</p>
+      <label>Formats (optional)</label>
+      <div class="formats-list">
+        {#each formats as f}
+          <label class="fmt"><input type="checkbox" checked={format_ids.includes(f.id)} on:change={(e) => {
+            const checked = (e.target as HTMLInputElement).checked;
+            if (checked) {
+              if (!format_ids.includes(f.id)) format_ids = [...format_ids, f.id];
+            } else {
+              format_ids = format_ids.filter((x) => x !== f.id);
+            }
+          }} /> {f.title}</label>
+        {/each}
+        {#if !formats.length}
+          <div class="empty">No formats saved. Use the Formats button to add some.</div>
+        {/if}
+      </div>
       <label for="extra_text">Extra Context</label>
       <textarea id="extra_text" bind:value={extra_text} placeholder="Paste additional context to include (optional)"></textarea>
 
@@ -85,4 +109,9 @@
 
   .spinner { width: 18px; height: 18px; border: 2px solid #93c5fd; border-top-color: #1d4ed8; border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .formats-list { display:flex; flex-direction: column; gap:.25rem; max-height: 180px; overflow:auto; border:1px solid #e5e7eb; border-radius:6px; padding:.5rem; }
+  .fmt { display:flex; align-items:center; gap:.4rem; font-size:.95rem; }
+  .empty { color:#6b7280; font-size:.9rem; }
 </style>
+
+<!-- no extra script -->

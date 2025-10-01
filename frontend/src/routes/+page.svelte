@@ -7,6 +7,7 @@
   import FileUpload from '../lib/components/FileUpload.svelte';
   import NarrativesDrawer from '../lib/components/NarrativesDrawer.svelte';
   import NarrativeGenerateModal from '../lib/components/NarrativeGenerateModal.svelte';
+  import FormatsManager from '../lib/components/FormatsManager.svelte';
 
   type Note = {
     filename: string;
@@ -38,6 +39,7 @@
   let initialNarrativeSelect: string | null = null;
   let isNarrativeModalOpen = false;
   let isGeneratingNarrative = false;
+  let isFormatsOpen = false;
 
   let includeDate: boolean = true;
   let includePlace: boolean = false;
@@ -50,6 +52,42 @@
   import FiltersBar, { type Filters } from '../lib/components/FiltersBar.svelte';
   import BulkActions from '../lib/components/BulkActions.svelte';
   let filters: Filters = { dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '' };
+  let layout: 'list' | 'compact' | 'grid3' = 'list';
+  // Client-side duration cache for notes missing length_seconds
+  let computedDurations: Record<string, number> = {};
+
+  async function loadDurationFor(filename: string): Promise<number | null> {
+    return new Promise((resolve) => {
+      try {
+        const audio = new Audio();
+        audio.preload = 'metadata';
+        audio.src = `${BACKEND_URL}/voice_notes/${filename}`;
+        const cleanup = () => {
+          audio.onloadedmetadata = null;
+          audio.onerror = null;
+        };
+        audio.onloadedmetadata = () => {
+          const dur = Number.isFinite(audio.duration) ? Math.round(audio.duration * 100) / 100 : NaN;
+          cleanup();
+          resolve(Number.isFinite(dur) ? dur : null);
+        };
+        audio.onerror = () => { cleanup(); resolve(null); };
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  async function ensureDurations() {
+    const targets = notes.filter((n) => n && n.filename && (n.length_seconds == null) && !(n.filename in computedDurations));
+    for (const n of targets) {
+      const d = await loadDurationFor(n.filename);
+      if (d != null) {
+        computedDurations[n.filename] = d;
+      }
+    }
+    applyFilters();
+  }
 
   function applyFilters() {
     const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
@@ -59,11 +97,22 @@
       .split(/[ ,]+/)
       .map((t) => t.trim())
       .filter(Boolean);
-    const minLen = typeof filters.minLen === 'number' ? filters.minLen : null;
-    const maxLen = typeof filters.maxLen === 'number' ? filters.maxLen : null;
+    const minLen = typeof filters.minLen === 'number' && Number.isFinite(filters.minLen) ? filters.minLen : null;
+    const maxLen = typeof filters.maxLen === 'number' && Number.isFinite(filters.maxLen) ? filters.maxLen : null;
     const q = filters.search.trim().toLowerCase();
 
+    console.log('[applyFilters] filters', filters);
     filteredNotes = notes.filter((n) => {
+      let len: number | null = null;
+      if (typeof n.length_seconds === 'number' && Number.isFinite(n.length_seconds)) {
+        len = n.length_seconds;
+      } else if (typeof n.length_seconds === 'string') {
+        const parsed = Number(n.length_seconds);
+        if (Number.isFinite(parsed)) len = parsed;
+      }
+      if (len == null && computedDurations[n.filename] != null) {
+        len = computedDurations[n.filename];
+      }
       // Date filter
       if (from || to) {
         if (!n.date) return false;
@@ -82,15 +131,25 @@
         if (!hasAny) return false;
       }
       // Length filter
-      if (minLen !== null && (n.length_seconds ?? 0) < minLen) return false;
-      if (maxLen !== null && (n.length_seconds ?? 0) > maxLen) return false;
+      const passLen = !((minLen !== null && len !== null && len < minLen) || (maxLen !== null && len !== null && len > maxLen));
+      if (!passLen) {
+        console.log('[applyFilters] drop by length', { file: n.filename, raw: n.length_seconds, len, minLen, maxLen });
+        return false;
+      }
       // Text search across title + transcription
       if (q) {
         const hay = `${n.title ?? ''} ${n.transcription ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      return true;
+      const keep = true;
+      if (!keep) {
+        console.log('[applyFilters] drop by other filter', { file: n.filename });
+      } else {
+        console.log('[applyFilters] keep', { file: n.filename, len, date: n.date, topics: n.topics });
+      }
+      return keep;
     });
+    console.log('[applyFilters] result', { total: notes.length, filtered: filteredNotes.length });
   }
 
   // Reset handled by FiltersBar
@@ -104,29 +163,39 @@
     expandedNotes = new Set(expandedNotes); // Fix: Trigger Svelte reactivity
   }
 
-  function handleSelectNote(event: CustomEvent<{ filename: string; selected: boolean }>) {
-    const { filename, selected } = event.detail;
-    if (selected) {
-      selectedNotes.add(filename);
+  let lastSelectedIndex: number | null = null;
+  function handleSelectNote(event: CustomEvent<{ filename: string; selected: boolean; index: number; shift?: boolean }>) {
+    const { filename, selected, index, shift } = event.detail;
+    const inRangeSelect = (idx: number, state: boolean) => {
+      const fn = filteredNotes[idx]?.filename;
+      if (!fn) return;
+      if (state) selectedNotes.add(fn); else selectedNotes.delete(fn);
+    };
+    if (shift && lastSelectedIndex !== null && filteredNotes.length > 0) {
+      const start = Math.max(0, Math.min(lastSelectedIndex, index));
+      const end = Math.min(filteredNotes.length - 1, Math.max(lastSelectedIndex, index));
+      for (let i = start; i <= end; i++) inRangeSelect(i, selected);
     } else {
-      selectedNotes.delete(filename);
+      inRangeSelect(index, selected);
     }
     selectedNotes = new Set(selectedNotes);
+    // Update anchor only on non-shift clicks (common UX)
+    if (!shift) lastSelectedIndex = index;
   }
 
   function createNarrative() {
     isNarrativeModalOpen = true;
   }
 
-  async function submitNarrativeGeneration(e: CustomEvent<{ extra_text: string; provider: string; model: string; temperature: number }>) {
+  async function submitNarrativeGeneration(e: CustomEvent<{ extra_text: string; provider: string; model: string; temperature: number; format_ids?: string[] }>) {
     const selectedNotesArray = Array.from(selectedNotes).map((filename) => ({ filename }));
-    const { extra_text, provider, model, temperature } = e.detail;
+    const { extra_text, provider, model, temperature, format_ids } = e.detail;
     try {
       isGeneratingNarrative = true;
       const response = await fetch(`${BACKEND_URL}/api/narratives/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: selectedNotesArray, extra_text, provider, model: model || undefined, temperature })
+        body: JSON.stringify({ items: selectedNotesArray, extra_text, provider, model: model || undefined, temperature, format_ids })
       });
       if (response.ok) {
         const data = await response.json();
@@ -180,6 +249,8 @@
       if (response.ok) {
         notes = await response.json();
         applyFilters();
+        // Fill missing durations in the background for better filtering UX
+        ensureDurations();
       } else {
         console.error('Failed to fetch notes:', response.statusText);
       }
@@ -395,10 +466,10 @@
 
 </script>
 
-<main style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem;">
+<main class="page">
   <Toast message={toastMessage} show={showToast} />
 
-  <h1 style="text-align: center;">Narrative Hero</h1>
+  <h1 class="title">Narrative Hero</h1>
 
   <div class="controls-container">
     <FileUpload on:files-selected={async (e) => {
@@ -420,6 +491,7 @@
       }, 300);
     }} />
     <button class="narrative-button" on:click={() => (isNarrativesDrawerOpen = true)}>View Narratives</button>
+    <button class="narrative-button" on:click={() => (isFormatsOpen = true)}>Formats</button>
   </div>
 
   <RecordingControls
@@ -443,23 +515,57 @@
     <div class="loading-indicator">Processing your note, please wait...</div>
   {/if}
 
-  <FiltersBar bind:filters on:change={(e) => { filters = e.detail; applyFilters(); }} counts={{ total: notes.length, filtered: filteredNotes.length }} />
+  <FiltersBar
+    {filters}
+    on:change={(e) => {
+      console.log('[Page] Filters change', e.detail);
+      filters = e.detail;
+      applyFilters();
+    }}
+    on:selectAll={() => {
+      selectedNotes = new Set(filteredNotes.map((n) => n.filename));
+    }}
+    on:clearSelection={() => {
+      selectedNotes.clear();
+      selectedNotes = new Set(selectedNotes);
+      lastSelectedIndex = null;
+    }}
+    counts={{ total: notes.length, filtered: filteredNotes.length }}
+  />
   <!-- legacy filters markup removed -->
+
+  <div class="view-toggle">
+    <label>View:</label>
+    <div class="seg">
+      <button class:active={layout==='list'} on:click={() => (layout='list')}>List</button>
+      <button class:active={layout==='compact'} on:click={() => (layout='compact')}>Compact</button>
+      <button class:active={layout==='grid3'} on:click={() => (layout='grid3')}>Grid x3</button>
+    </div>
+  </div>
 
   <NotesList
     notes={filteredNotes}
     {expandedNotes}
     {selectedNotes}
+    {layout}
     on:toggle={(e) => toggleExpand(e.detail)}
     on:copy={(e) => copyToClipboard(e.detail)}
     on:delete={(e) => deleteNote(e.detail)}
     on:select={handleSelectNote}
   />
 
-  <BulkActions selectedCount={selectedNotes.size} {isBulkDeleting} on:deleteSelected={deleteSelectedNotes} on:createNarrative={createNarrative} />
+  <BulkActions
+    selectedCount={selectedNotes.size}
+    {isBulkDeleting}
+    on:deleteSelected={deleteSelectedNotes}
+    on:createNarrative={createNarrative}
+    on:selectAll={() => { selectedNotes = new Set(filteredNotes.map((n) => n.filename)); }}
+    on:clearSelection={() => { selectedNotes.clear(); selectedNotes = new Set(selectedNotes); lastSelectedIndex = null; }}
+  />
 </main>
 
 <NarrativesDrawer isOpen={isNarrativesDrawerOpen} initialSelect={initialNarrativeSelect} onClose={() => (isNarrativesDrawerOpen = false)} />
+<FormatsManager open={isFormatsOpen} on:close={() => (isFormatsOpen = false)} />
 <NarrativeGenerateModal
   open={isNarrativeModalOpen}
   selected={Array.from(selectedNotes)}
@@ -469,17 +575,21 @@
 />
 
 <style>
-  main {
+  .page {
     font-family: sans-serif;
-    max-width: 600px;
-    margin: auto;
-    padding: 2rem;
+    width: 100%;
+    padding: 1rem 2rem;
+    box-sizing: border-box;
   }
+  @media (max-width: 900px) { .page { padding: 1rem; } }
+  .title { margin: 0 0 1rem 0; font-size: 1.6rem; font-weight: 700; }
 
   .controls-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: .75rem;
     margin-bottom: 1rem;
   }
 
@@ -508,6 +618,11 @@
   }
   .progress { height: 8px; background:#e5e7eb; border-radius: 9999px; margin-top: 8px; overflow:hidden; }
   .bar { height: 100%; background:#3B82F6; width: 0; transition: width 0.2s ease; }
+
+  .view-toggle { display:flex; align-items:center; gap:.5rem; margin: .5rem 0 1rem 0; }
+  .view-toggle .seg { display:inline-flex; border:1px solid #e5e7eb; border-radius: 8px; overflow:hidden; }
+  .view-toggle .seg button { border:none; padding:.35rem .6rem; background:#fff; cursor:pointer; }
+  .view-toggle .seg button.active { background:#eef2ff; color:#4338ca; font-weight:600; }
 
   /* Filters moved to FiltersBar component */
 </style>

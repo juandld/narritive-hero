@@ -8,10 +8,16 @@
   const dispatch = createEventDispatcher();
   function onDelete() { dispatch('deleteSelected'); }
   function onCreate() { dispatch('createNarrative'); }
+  function onSelectAll() { dispatch('selectAll'); }
+  function onClear() { dispatch('clearSelection'); }
 </script>
 
 {#if selectedCount > 0}
   <div class="bulk-actions">
+    <div class="left">
+      <button class="pill" on:click={onSelectAll} title="Select all">Select all</button>
+      <button class="pill" on:click={onClear} title="Clear selection">Clear</button>
+    </div>
     <button class="action-button delete" disabled={isDeleting} on:click={onDelete}>
       {isDeleting ? 'Deleting…' : `Delete ${selectedCount} selected`}
     </button>
@@ -32,6 +38,8 @@
     align-items: center;
     z-index: 10;
   }
+  .left { display:flex; gap:.5rem; }
+  .pill { background:#fff; color:#111; border:1px solid #e5e7eb; padding:.5rem .8rem; border-radius: 9999px; cursor:pointer; }
   .action-button {
     border: none;
     padding: 1rem 1.5rem;
@@ -44,4 +52,3 @@
   .action-button.create { background-color: #28a745; }
   .action-button.delete { background-color: #db4437; }
 </style>
-

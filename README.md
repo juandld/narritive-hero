@@ -39,7 +39,11 @@ This is the recommended way to run the project.
     ```
 
 2.  **Create a `.env` file (backend):**
+   You can start from the example file.
     ```ini
+    # Copy example and edit values
+    # cp backend/.env.example backend/.env
+
     # Primary Gemini key
     GOOGLE_API_KEY="your-gemini-key-A"
     # Optional extra Gemini keys for rotation
@@ -63,15 +67,19 @@ This is the recommended way to run the project.
 
 3.  **Build and run the application with Docker Compose:**
     ```bash
-    docker-compose up --build
+    # Compose V2 syntax
+    docker compose up --build
+    # (Older Docker installs may use: docker-compose up --build)
     ```
 
 4.  **Access the application:**
     The frontend will be available at `http://localhost`.
+    - Backend API: `http://localhost:8000` (FastAPI docs at `http://localhost:8000/docs`)
+    - Ports: frontend `80`, backend `8000` (see `compose.yaml`)
 
 ### Local Development
 
-For development, you can run the frontend and backend services separately.
+For development, you can run the frontend and backend services separately, or use the root helper script to run both.
 
 #### Backend
 
@@ -82,9 +90,20 @@ For development, you can run the frontend and backend services separately.
 
 2.  **Create `.env` (see example above).**
 
-3.  **Run the development script:**
+3.  **Create a virtualenv (first time only):**
     ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    ```
+
+4.  **Run the development server:**
+    ```bash
+    # Option A: use the helper script (expects an existing venv)
     ./dev.sh
+
+    # Option B: run directly with uvicorn
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ```
     This script will automatically create a virtual environment, install dependencies if needed, and start the backend server at `http://localhost:8000`.
 
@@ -106,6 +125,15 @@ For development, you can run the frontend and backend services separately.
     ```
     The frontend will be available at `http://localhost:5173`.
 
+#### Run both (convenience)
+
+From the repo root you can start both dev servers together:
+
+```bash
+./dev.sh
+```
+This launches the Svelte dev server and the FastAPI dev server concurrently.
+
     - Optional: Chrome DevTools notice
       - Chrome may request `/.well-known/appspecific/com.chrome.devtools.json` to auto-configure project settings.
       - A minimal file is provided at `frontend/static/.well-known/appspecific/com.chrome.devtools.json` to satisfy this and suppress the notice.
@@ -124,6 +152,9 @@ For development, you can run the frontend and backend services separately.
   - `storage/transcriptions/` one JSON per note (see schema below)
   - `storage/narratives/` saved narratives as `.txt`
 - `compose.yaml` Docker Compose services
+
+Notes:
+- In Docker, the frontend is served as static files via Nginx and the browser calls the backend at `http://localhost:8000` directly (published from the backend container). No proxy is required.
 
 ## Note JSON Schema
 
@@ -159,6 +190,7 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
 - Notes
   - GET `/api/notes` → list with metadata (title, transcription, date, length, topics, tags)
   - POST `/api/notes` (multipart: `file`) → save audio; transcribe/title in background
+  - POST `/api/notes/{filename}/retry` → requeue background transcribe/title for an existing note
   - DELETE `/api/notes/{filename}` → delete audio + JSON
   - PATCH `/api/notes/{filename}/tags` → `{ "tags": [{"label":"…","color":"#…"}] }`
 - Narratives
@@ -169,6 +201,16 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
   - POST `/api/narratives/generate` → generate via LLM
     - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
     - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`
+
+- Formats (optional saved prompts for generation)
+  - GET `/api/formats` → list saved formats `{ id, title, prompt }`
+  - POST `/api/formats` → create/update `{ title, prompt, id? }` → `{ id }`
+  - DELETE `/api/formats/{id}` → remove a saved format
+
+- Static
+  - `/voice_notes/{filename}` → serves uploaded audio files
+
+Open API docs: visit `http://localhost:8000/docs`.
   
 
 ## Frontend Highlights
@@ -178,11 +220,26 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
 - NoteItem: tag chips with compact color picker, preview snippet, expand/collapse
 - Config: `frontend/src/lib/config.ts` hosts `BACKEND_URL`
 
+Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container.
+
 ## LangHero (separate app)
 
 - The previous experimental "Learn" route has been split out into its own project: `langhero`.
 - Location: `/home/raw/projects/langhero` (same stack and dev/deploy flow as this project).
 - Run it the same way (Docker Compose or separate backend/frontend dev). Its frontend root renders the scenario UI and uses its own backend copy of the scenario route.
+
+## Testing
+
+- Lightweight smoke tests exist under `tests/`.
+- To run backend-focused smoke tests locally:
+  - `bash tests/backend/test.sh` (attempts to create a venv and run quick checks)
+  - If running offline or without API keys, tests stub external calls where possible.
+
+## Troubleshooting
+
+- No transcription/title appears: ensure `GOOGLE_API_KEY` is set, or configure `OPENAI_API_KEY` for fallback.
+- Quota/rate limits: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
+- Chrome DevTools “project settings” notice: suppressed by `frontend/static/.well-known/appspecific/com.chrome.devtools.json`.
 
 ## Tips
 

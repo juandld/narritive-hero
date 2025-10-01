@@ -11,6 +11,8 @@
   };
   export let expanded: boolean;
   export let selected: boolean;
+  export let index: number;
+  export let variant: 'full' | 'compact' = 'full';
 
   const dispatch = createEventDispatcher();
 
@@ -80,52 +82,60 @@
     dispatch('delete');
   }
 
-  function onSelect() {
-    dispatch('select', { filename: note.filename, selected: !selected });
+  // checkbox removed; selection handled by card click
+
+  function onCardClick(e: MouseEvent) {
+    // Toggle selection when clicking on the card background area
+    const shift = e.shiftKey === true;
+    const next = !selected;
+    dispatch('select', { filename: note.filename, selected: next, index, shift });
+  }
+
+  function onCardKey(e: KeyboardEvent) {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      const next = !selected;
+      dispatch('select', { filename: note.filename, selected: next, index, shift: false });
+    }
   }
 </script>
 
-<li style="margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px;">
-  <input type="checkbox" checked={selected} on:change={onSelect} />
-  <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;">
-    <p style="margin:0; font-weight: 600; font-size: 1rem;">{note.title || note.filename.replace(/\.wav$/i,'')}</p>
-    <small style="color:#666;">{note.date}{#if note.length_seconds} • {note.length_seconds}s{/if}</small>
+<li class="card {variant}" class:selected={selected} on:mousedown={(e)=>{ if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }} on:click={onCardClick} on:keydown={onCardKey} aria-selected={selected} tabindex="0">
+  <div class="header">
+    <p class="title">{note.title || note.filename.replace(/\.\w+$/i,'')}</p>
+    <small class="meta">{note.date}{#if note.length_seconds} • {note.length_seconds}s{/if}</small>
   </div>
-  <div style="margin: 0.25rem 0 0.5rem 0; display:flex; gap:0.35rem; flex-wrap: wrap;">
+  <div class="chips">
     {#if note.topics && note.topics.length}
       {#each note.topics as t}
-        <span style="background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:12px; font-size:0.75rem;">{t}</span>
+        <span class="topic">{t}</span>
       {/each}
     {/if}
     {#if note.tags && note.tags.length}
       {#each note.tags as t, i}
-        <span style="background:{t.color || '#6B7280'}; color:#fff; padding:2px 8px; border-radius:12px; font-size:0.75rem; display:inline-flex; align-items:center; gap:6px;">
+        <span class="tag" style="background:{t.color || '#6B7280'};">
           {t.label}
-          <button aria-label="Remove tag" on:click={() => removeTag(i)} style="background:none; border:none; cursor:pointer;">×</button>
+          <button aria-label="Remove tag" on:click|stopPropagation={() => removeTag(i)} class="tag-x">×</button>
         </span>
       {/each}
     {/if}
   </div>
 
-  <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; flex-wrap: wrap; position: relative;">
-    <input aria-label="New tag" placeholder="Add tag" bind:value={newTagLabel} style="flex:1; min-width: 140px; padding:0.35rem 0.5rem; border:1px solid #e5e7eb; border-radius:6px;" />
-    <button type="button" aria-label="Selected color" on:click={() => (showPalette = !showPalette)}
-      style="width:26px; height:26px; border-radius:50%; border:2px solid #111; background:{newTagColor}; cursor:pointer;">
-    </button>
+  <div class="tag-editor" class:hide={variant==='compact'}>
+    <input aria-label="New tag" placeholder="Add tag" bind:value={newTagLabel} />
+    <button type="button" aria-label="Selected color" class="color" on:click|stopPropagation={() => (showPalette = !showPalette)} style="background:{newTagColor};"></button>
     {#if showPalette}
-      <div style="position:absolute; right:64px; bottom:40px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px; display:flex; gap:6px; box-shadow:0 10px 20px rgba(0,0,0,0.08);">
+      <div class="palette" on:click|stopPropagation>
         {#each TAG_COLORS as c}
-          <button type="button" title={c.label} aria-label={c.label} on:click={() => selectColor(c.value)}
-            style="width:22px; height:22px; border-radius:50%; border:2px solid {newTagColor===c.value ? '#111' : '#fff'}; background:{c.value}; cursor:pointer;">
-          </button>
+          <button type="button" title={c.label} aria-label={c.label} on:click={() => selectColor(c.value)} style="background:{c.value}; border-color:{newTagColor===c.value ? '#111' : '#fff'}"></button>
         {/each}
       </div>
     {/if}
-    <button on:click={addTag} style="background-color:#1a73e8; color:white; border:none; padding:0.45rem 0.8rem; border-radius:6px; cursor:pointer;">Add</button>
+    <button on:click|stopPropagation={addTag} class="add">Add</button>
   </div>
-  <audio controls src="{`${BACKEND_URL}/voice_notes/${note.filename}`}" style="width: 100%; margin-bottom: 0.5rem;"></audio>
-  <blockquote style="background-color: white; padding: 0.5rem 1rem; border-left: 5px solid #4285f4; margin: 0; border-radius: 4px;">
-    <p>
+  <audio controls src="{`${BACKEND_URL}/voice_notes/${note.filename}`}"></audio>
+  <blockquote class="text" on:mousedown={(e) => { if (!expanded) { e.preventDefault(); } }}>
+    <p class:clamp={variant==='compact' && !expanded} class:selectable={expanded} class:noselect={!expanded}>
       {#if note.transcription}
         {expanded ? note.transcription : (previewText.length > MAX_PREVIEW ? previewText.slice(0, MAX_PREVIEW) + '…' : previewText)}
       {:else}
@@ -133,22 +143,43 @@
       {/if}
     </p>
     {#if previewText && previewText.length > 0}
-      <button
-        on:click={toggleExpand}
-        style="background: none; border: none; color: #4285f4; cursor: pointer; font-size: 0.9em; transform: rotate({expanded ? '180deg' : '0deg'});"
-      >
+      <button class="toggle" on:click|stopPropagation={toggleExpand}>
         {expanded ? '\u25B2' : '\u25BC'}
       </button>
     {/if}
   </blockquote>
-  <button
-    on:click={copyToClipboard}
-    style="background-color: #4285f4; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px;"
-    >Copy TS</button
-  >
-  <button
-    on:click={deleteNote}
-    style="background-color: #db4437; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; margin-left: 10px;"
-    >Delete</button
-  >
+  <div class="actions">
+    <button class="primary" on:click|stopPropagation={copyToClipboard}>Copy TS</button>
+    <button class="danger" on:click|stopPropagation={deleteNote}>Delete</button>
+  </div>
 </li>
+
+<style>
+  .card { position: relative; margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px; cursor: pointer; }
+  .card.compact { margin-bottom: .75rem; padding: .6rem .7rem; }
+  .header { display:flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+  .title { margin:0; font-weight: 600; font-size: 1rem; }
+  .card.compact .title { font-size: .95rem; }
+  .meta { color:#666; }
+  .chips { margin: .25rem 0 .5rem 0; display:flex; gap:.35rem; flex-wrap: wrap; }
+  .topic { background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:12px; font-size:.75rem; }
+  .tag { color:#fff; padding:2px 8px; border-radius:12px; font-size:.75rem; display:inline-flex; align-items:center; gap:6px; }
+  .tag .tag-x { background:none; border:none; cursor:pointer; color:#fff; }
+  .tag-editor { display:flex; gap:.5rem; align-items:center; margin-bottom:.5rem; flex-wrap: wrap; position: relative; }
+  .tag-editor.hide { display:none; }
+  .tag-editor input { flex:1; min-width:140px; padding:.35rem .5rem; border:1px solid #e5e7eb; border-radius:6px; }
+  .tag-editor .color { width:26px; height:26px; border-radius:50%; border:2px solid #111; cursor:pointer; }
+  .tag-editor .palette { position:absolute; right:64px; bottom:40px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px; display:flex; gap:6px; box-shadow:0 10px 20px rgba(0,0,0,0.08); }
+  .tag-editor .palette button { width:22px; height:22px; border-radius:50%; border:2px solid #fff; cursor:pointer; }
+  audio { width:100%; margin-bottom:.5rem; }
+  .text { background-color:#fff; padding:.5rem 1rem; border-left:5px solid #4285f4; margin:0; border-radius:4px; }
+  .text p { margin: .25rem 0; }
+  .text p.noselect { user-select: none; -webkit-user-select: none; -ms-user-select: none; }
+  .text p.selectable { user-select: text; -webkit-user-select: text; }
+  .text p.clamp { display:-webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow:hidden; }
+  .toggle { background:none; border:none; color:#4285f4; cursor:pointer; font-size:.9em; transform: rotate(var(--deg, 0deg)); }
+  .actions { margin-top: 10px; display:flex; gap:.5rem; }
+  .actions .primary { background-color:#4285f4; color:#fff; padding:.5rem 1rem; border:none; border-radius:4px; cursor:pointer; }
+  .actions .danger { background-color:#db4437; color:#fff; padding:.5rem 1rem; border:none; border-radius:4px; cursor:pointer; }
+  .card.selected { outline: 2px solid #3B82F6; outline-offset: 0; }
+</style>

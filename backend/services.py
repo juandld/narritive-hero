@@ -182,7 +182,7 @@ def get_notes():
     wav_files = [f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)]
     wav_files.sort(key=lambda f: os.path.getmtime(os.path.join(VOICE_NOTES_DIR, f)), reverse=True)
     for filename in wav_files:
-        base_filename = filename[:-4]
+        base_filename = os.path.splitext(filename)[0]
         audio_path = os.path.join(VOICE_NOTES_DIR, filename)
         data, transcription, title = note_store.load_note_json(base_filename)
         if data is None:

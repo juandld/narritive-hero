@@ -20,6 +20,7 @@ from models import TagsUpdate
 from utils import on_startup
 import uvicorn
 import os
+import json
 from datetime import datetime
 import uuid
 import asyncio
@@ -47,6 +48,7 @@ app.add_middleware(
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 NARRATIVES_DIR = config.NARRATIVES_DIR
+FORMATS_DIR = getattr(config, 'FORMATS_DIR', os.path.join(config.STORAGE_DIR, 'formats'))
 
 # Mount static files directory for voice notes
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR, check_dir=False), name="voice_notes")
@@ -235,6 +237,11 @@ async def generate_narrative(request: Request):
             "You are an expert editor. Synthesize a cohesive, structured narrative from the provided notes and context. "
             "Focus on clarity, key insights, and concrete action items. Keep it concise and readable."
         )
+        parent_filename = (body or {}).get("parent") or None
+        # Optional saved format task prompt (id or inline prompt)
+        format_id = (body or {}).get("format_id")
+        format_ids = (body or {}).get("format_ids") or []
+        format_prompt_inline = (body or {}).get("format_prompt")
 
         # Collect sources
         if not isinstance(items, list):
@@ -260,7 +267,38 @@ async def generate_narrative(request: Request):
             return Response(status_code=400)
 
         # Build prompt
-        parts = [system_inst.strip(), "\n\nContext Notes:\n"]
+        parts = [system_inst.strip()]
+        # If a saved format or inline format prompt present, add it at top as task instruction
+        try:
+            fmt_chunks = []
+            # single id
+            if format_id:
+                p = os.path.join(FORMATS_DIR, f"{format_id}.json")
+                if os.path.exists(p):
+                    with open(p, 'r') as f:
+                        fmt = json.load(f)
+                    t = (fmt or {}).get('prompt')
+                    if t: fmt_chunks.append(str(t))
+            # multiple ids
+            if isinstance(format_ids, list):
+                for fid in format_ids:
+                    try:
+                        p = os.path.join(FORMATS_DIR, f"{fid}.json")
+                        if os.path.exists(p):
+                            with open(p, 'r') as f:
+                                fmt = json.load(f)
+                            t = (fmt or {}).get('prompt')
+                            if t: fmt_chunks.append(str(t))
+                    except Exception:
+                        continue
+            # inline prompt
+            if format_prompt_inline:
+                fmt_chunks.append(str(format_prompt_inline))
+            if fmt_chunks:
+                parts.append("\n\nTask Formats:\n" + "\n\n---\n\n".join([c.strip() for c in fmt_chunks if c and c.strip()]))
+        except Exception:
+            pass
+        parts.append("\n\nContext Notes:\n")
         for i, (title, text) in enumerate(sources, start=1):
             parts.append(f"[{i}] {title}\n{text}\n")
         if extra_text.strip():
@@ -301,6 +339,60 @@ async def generate_narrative(request: Request):
         with open(out, "w") as f:
             f.write(content or "")
 
+        # --- Version threading: record parent→child relationship ---
+        try:
+            def _threads_path():
+                return os.path.join(NARRATIVES_DIR, "threads.json")
+
+            def _load_threads():
+                p = _threads_path()
+                if not os.path.exists(p):
+                    return {"threads": [], "map": {}}
+                with open(p, "r") as tf:
+                    return json.load(tf)
+
+            def _save_threads(data):
+                p = _threads_path()
+                tmp = p + ".tmp"
+                with open(tmp, "w") as tf:
+                    json.dump(data, tf)
+                os.replace(tmp, p)
+
+            if parent_filename:
+                data = _load_threads()
+                mp = data.get("map", {})
+                threads = data.get("threads", [])
+                thread_id = mp.get(parent_filename)
+                if not thread_id:
+                    # Create a new thread starting from parent
+                    base = os.path.splitext(parent_filename)[0]
+                    thread_id = base
+                    # Ensure uniqueness
+                    existing_ids = {t.get("id") for t in threads}
+                    idx = 1
+                    while thread_id in existing_ids:
+                        idx += 1
+                        thread_id = f"{base}-{idx}"
+                    threads.append({
+                        "id": thread_id,
+                        "files": [parent_filename, name],
+                    })
+                    mp[parent_filename] = thread_id
+                    mp[name] = thread_id
+                else:
+                    # Append to existing thread if not already present
+                    for t in threads:
+                        if t.get("id") == thread_id:
+                            if name not in t.get("files", []):
+                                t.setdefault("files", []).append(name)
+                            break
+                    mp[name] = thread_id
+                data["map"] = mp
+                data["threads"] = threads
+                _save_threads(data)
+        except Exception:
+            pass
+
         try:
             usage.log_usage(
                 event="narrative",
@@ -313,6 +405,88 @@ async def generate_narrative(request: Request):
             pass
 
         return {"filename": name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/narratives/thread/{filename}")
+async def get_thread(filename: str):
+    """Return the version thread (files and index) for a given narrative file."""
+    try:
+        path = os.path.join(NARRATIVES_DIR, "threads.json")
+        if not os.path.exists(path):
+            return {"files": [filename], "index": 0}
+        with open(path, "r") as f:
+            data = json.load(f)
+        mp = data.get("map", {})
+        th_id = mp.get(filename)
+        if not th_id:
+            return {"files": [filename], "index": 0}
+        for t in data.get("threads", []):
+            if t.get("id") == th_id:
+                files = t.get("files", [])
+                try:
+                    idx = files.index(filename)
+                except ValueError:
+                    idx = 0
+                return {"files": files, "index": idx}
+        return {"files": [filename], "index": 0}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ----------------- Formats API -----------------
+
+@app.get("/api/formats")
+async def list_formats():
+    os.makedirs(FORMATS_DIR, exist_ok=True)
+    out = []
+    for fn in sorted(os.listdir(FORMATS_DIR)):
+        if fn.endswith('.json'):
+            try:
+                with open(os.path.join(FORMATS_DIR, fn), 'r') as f:
+                    data = json.load(f)
+                # Ensure id from filename if missing
+                fid = data.get('id') or os.path.splitext(fn)[0]
+                out.append({
+                    'id': fid,
+                    'title': data.get('title') or fid,
+                    'prompt': data.get('prompt') or ''
+                })
+            except Exception:
+                continue
+    return out
+
+
+@app.post("/api/formats")
+async def create_or_update_format(request: Request):
+    try:
+        body = await request.json()
+        title = (body or {}).get('title')
+        prompt = (body or {}).get('prompt')
+        fid = (body or {}).get('id')
+        if not title or not prompt:
+            return Response(status_code=400)
+        os.makedirs(FORMATS_DIR, exist_ok=True)
+        if not fid:
+            import uuid as _uuid
+            fid = _uuid.uuid4().hex[:12]
+        path = os.path.join(FORMATS_DIR, f"{fid}.json")
+        with open(path, 'w') as f:
+            json.dump({'id': fid, 'title': title, 'prompt': prompt}, f, ensure_ascii=False)
+        return {'id': fid}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/formats/{fid}")
+async def delete_format(fid: str):
+    try:
+        path = os.path.join(FORMATS_DIR, f"{fid}.json")
+        if os.path.exists(path):
+            os.remove(path)
+            return Response(status_code=200)
+        return Response(status_code=404)
     except Exception as e:
         return {"error": str(e)}
 

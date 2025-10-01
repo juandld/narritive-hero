@@ -5,6 +5,7 @@
   export let notes: any[];
   export let expandedNotes: Set<string>;
   export let selectedNotes: Set<string>;
+  export let layout: 'list' | 'compact' | 'grid3' = 'list';
 
   const dispatch = createEventDispatcher();
 
@@ -20,19 +21,21 @@
     dispatch('delete', filename);
   }
 
-  function selectNote(event: CustomEvent<{ filename: string; selected: boolean }>) {
+  function selectNote(event: CustomEvent<{ filename: string; selected: boolean; index: number; shift?: boolean }>) {
     dispatch('select', event.detail);
   }
 </script>
 
 <h2>Saved Notes</h2>
 {#if notes.length > 0}
-  <ul style="list-style: none; padding: 0;">
-    {#each notes as note}
+  <ul class:as-grid={layout === 'grid3'} class:compact={layout !== 'list'}>
+    {#each notes as note, i}
       <NoteItem
         {note}
         expanded={expandedNotes.has(note.filename)}
         selected={selectedNotes.has(note.filename)}
+        index={i}
+        variant={layout === 'list' ? 'full' : 'compact'}
         on:toggle={() => toggleExpand(note.filename)}
         on:copy={() => copyToClipboard(note.transcription)}
         on:delete={() => deleteNote(note.filename)}
@@ -43,3 +46,15 @@
 {:else}
   <p>No notes found. Record one above!</p>
 {/if}
+
+<style>
+  ul { list-style: none; padding: 0; margin: 0; }
+  ul.as-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  @media (max-width: 900px) { ul.as-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 600px) { ul.as-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); } }
+  ul.compact :global(li) { margin-bottom: 0.75rem !important; }
+</style>

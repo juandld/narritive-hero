@@ -11,17 +11,30 @@ import os
 import wave
 import contextlib
 from datetime import datetime
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 
 import config
 
 
-def audio_length_seconds(path: str) -> float | None:
+def audio_length_seconds(path: str) -> Optional[float]:
+    """Return audio length in seconds for common formats.
+
+    Uses wave module for WAV; falls back to pydub (ffmpeg) for other types.
+    """
     try:
-        with contextlib.closing(wave.open(path, 'rb')) as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            return round(frames / float(rate), 2) if rate else None
+        # Prefer the lightweight wave reader for .wav files
+        if path.lower().endswith('.wav'):
+            with contextlib.closing(wave.open(path, 'rb')) as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                return round(frames / float(rate), 2) if rate else None
+        # Non-wav: try pydub if available
+        try:
+            from pydub import AudioSegment
+            seg = AudioSegment.from_file(path)
+            return round(len(seg) / 1000.0, 2)
+        except Exception:
+            return None
     except Exception:
         return None
 
@@ -80,17 +93,39 @@ def load_note_json(base_filename: str) -> Tuple[dict | None, str | None, str | N
         return None, None, None
 
 
+def _find_audio_path(base_filename: str, data: dict) -> Optional[str]:
+    """Locate the actual audio file for a note base name.
+
+    Prefer the filename embedded in JSON (data['filename']). Fallback to
+    scanning the voice notes directory for any supported extension.
+    """
+    # 1) Prefer JSON's filename, if present
+    fname = (data or {}).get('filename')
+    if isinstance(fname, str) and fname:
+        p = os.path.join(config.VOICE_NOTES_DIR, fname)
+        if os.path.exists(p):
+            return p
+    # 2) Scan for matching base with any known extension
+    AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
+    for ext in AUDIO_EXTS:
+        p = os.path.join(config.VOICE_NOTES_DIR, f"{base_filename}{ext}")
+        if os.path.exists(p):
+            return p
+    return None
+
+
 def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
     """Ensure date/length/topics/tags fields exist and persist if updated."""
-    audio_path = os.path.join(config.VOICE_NOTES_DIR, f"{base_filename}.wav")
+    audio_path = _find_audio_path(base_filename, data)
     updated = False
-    if not data.get("date"):
-        mtime = os.path.getmtime(audio_path)
-        data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-        updated = True
-    if data.get("length_seconds") is None:
-        data["length_seconds"] = audio_length_seconds(audio_path)
-        updated = True
+    if audio_path and os.path.exists(audio_path):
+        if not data.get("date"):
+            mtime = os.path.getmtime(audio_path)
+            data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+            updated = True
+        if data.get("length_seconds") is None:
+            data["length_seconds"] = audio_length_seconds(audio_path)
+            updated = True
     if not isinstance(data.get("topics"), list):
         data["topics"] = infer_topics(data.get("transcription"), data.get("title"))
         updated = True
