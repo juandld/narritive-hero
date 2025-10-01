@@ -16,7 +16,7 @@ from fastapi import FastAPI, File, UploadFile, Form, Response, Request, Backgrou
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from services import get_notes, transcribe_and_save
-from models import TagsUpdate
+from models import TagsUpdate, FolderUpdate
 from utils import on_startup
 import uvicorn
 import os
@@ -142,6 +142,24 @@ async def update_tags(filename: str, payload: TagsUpdate):
         with open(json_path, 'w') as f:
             json.dump(data, f, ensure_ascii=False)
         return {"status": "ok", "tags": tags}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.patch("/api/notes/{filename}/folder")
+async def update_folder(filename: str, payload: FolderUpdate):
+    """Update the folder for a note (stored in JSON). Pass folder: string or null/empty to clear."""
+    base_filename = os.path.splitext(filename)[0]
+    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
+    if not os.path.exists(json_path):
+        return Response(status_code=404)
+    try:
+        import json
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        data["folder"] = (payload.folder or "").strip()
+        with open(json_path, 'w') as f:
+            json.dump(data, f, ensure_ascii=False)
+        return {"status": "ok", "folder": data["folder"]}
     except Exception as e:
         return {"error": str(e)}
 
@@ -477,6 +495,28 @@ async def create_or_update_format(request: Request):
         return {'id': fid}
     except Exception as e:
         return {"error": str(e)}
+
+
+# ----------------- Folders API -----------------
+
+@app.get("/api/folders")
+async def list_folders():
+    """Return a list of folders with counts, derived from note JSONs."""
+    os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+    counts = {}
+    for fn in os.listdir(TRANSCRIPTS_DIR):
+        if not fn.endswith('.json'):
+            continue
+        try:
+            with open(os.path.join(TRANSCRIPTS_DIR, fn), 'r') as f:
+                data = json.load(f)
+            folder = (data.get('folder') or '').strip()
+            if folder:
+                counts[folder] = counts.get(folder, 0) + 1
+        except Exception:
+            continue
+    out = [{"name": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: kv[0].lower())]
+    return out
 
 
 @app.delete("/api/formats/{fid}")

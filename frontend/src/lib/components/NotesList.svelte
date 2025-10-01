@@ -6,6 +6,7 @@
   export let expandedNotes: Set<string>;
   export let selectedNotes: Set<string>;
   export let layout: 'list' | 'compact' | 'grid3' = 'list';
+  // no folder cards in this simplified view
 
   const dispatch = createEventDispatcher();
 

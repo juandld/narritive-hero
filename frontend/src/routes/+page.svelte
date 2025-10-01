@@ -16,6 +16,8 @@
     date?: string; // YYYY-MM-DD
     length_seconds?: number;
     topics?: string[];
+    folder?: string;
+    tags?: { label: string; color?: string }[];
   };
 
   let isRecording = false;
@@ -23,6 +25,7 @@
   let audioChunks: Blob[] = [];
   let notes: Note[] = [];
   let filteredNotes: Note[] = [];
+  // folders removed in simplified view
   let expandedNotes: Set<string> = new Set();
   let selectedNotes: Set<string> = new Set();
   let toastMessage = '';
@@ -55,6 +58,8 @@
   let layout: 'list' | 'compact' | 'grid3' = 'list';
   // Client-side duration cache for notes missing length_seconds
   let computedDurations: Record<string, number> = {};
+  // Expose current selection for drag payloads
+  $: if (typeof window !== 'undefined') { (window as any).__selectedNotes = new Set(selectedNotes); }
 
   async function loadDurationFor(filename: string): Promise<number | null> {
     return new Promise((resolve) => {
@@ -224,6 +229,8 @@
     }
   }
 
+  // move-to-folder removed in simplified view
+
   function getLocation(): Promise<string> {
     return new Promise((resolve, reject) => {
       if (navigator.geolocation) {
@@ -251,6 +258,7 @@
         applyFilters();
         // Fill missing durations in the background for better filtering UX
         ensureDurations();
+        // no folder refresh
       } else {
         console.error('Failed to fetch notes:', response.statusText);
       }
@@ -258,6 +266,8 @@
       console.error('Failed to fetch notes:', error);
     }
   }
+
+  // folders API removed for now in UI
 
   async function copyToClipboard(text: string | undefined) {
     if (!text) return;
@@ -625,4 +635,6 @@
   .view-toggle .seg button.active { background:#eef2ff; color:#4338ca; font-weight:600; }
 
   /* Filters moved to FiltersBar component */
+
+  /* simplified layout */
 </style>

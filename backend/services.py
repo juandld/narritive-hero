@@ -199,6 +199,7 @@ def get_notes():
                 "date": date_str,
                 "length_seconds": length_sec,
                 "topics": [],
+                "folder": "",
                 "tags": [],
             })
             continue
@@ -212,6 +213,7 @@ def get_notes():
             "date": data.get("date"),
             "length_seconds": data.get("length_seconds"),
             "topics": data.get("topics", []),
+            "folder": data.get("folder", ""),
             "tags": data.get("tags", []),
         })
     return notes

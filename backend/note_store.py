@@ -76,6 +76,7 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
         "date": date_str,
         "length_seconds": length_sec,
         "topics": topics,
+        "folder": "",
         "tags": [],
     }
 
@@ -131,6 +132,10 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
         updated = True
     if not isinstance(data.get("tags"), list):
         data["tags"] = []
+        updated = True
+    # Ensure folder string key exists
+    if not isinstance(data.get("folder"), str):
+        data["folder"] = ""
         updated = True
     if updated:
         save_note_json(base_filename, data)

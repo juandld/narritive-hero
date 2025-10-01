@@ -8,6 +8,8 @@
     date?: string;
     length_seconds?: number;
     topics?: string[];
+    folder?: string;
+    tags?: { label: string; color?: string }[];
   };
   export let expanded: boolean;
   export let selected: boolean;
@@ -17,6 +19,7 @@
   const dispatch = createEventDispatcher();
 
   import { BACKEND_URL } from '../config';
+  import AudioPlayer from './AudioPlayer.svelte';
 
   // Tag editing state
   let newTagLabel: string = '';
@@ -84,7 +87,9 @@
 
   // checkbox removed; selection handled by card click
 
+  let dragging = false;
   function onCardClick(e: MouseEvent) {
+    if (dragging) { return; }
     // Toggle selection when clicking on the card background area
     const shift = e.shiftKey === true;
     const next = !selected;
@@ -98,9 +103,25 @@
       dispatch('select', { filename: note.filename, selected: next, index, shift: false });
     }
   }
+
+  // Audio state for styling
+  let isLoaded = false;
+  let isPlaying = false;
 </script>
 
-<li class="card {variant}" class:selected={selected} on:mousedown={(e)=>{ if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }} on:click={onCardClick} on:keydown={onCardKey} aria-selected={selected} tabindex="0">
+<li draggable="true" on:dragstart={(e)=>{
+    dragging = true;
+    try{
+      const sel = (window as any)?.__selectedNotes;
+      const filenames = (selected && sel && typeof sel.size === 'number') ? Array.from(sel) : [note.filename];
+      const payload = { filenames };
+      // Fallback: if global not set, include just this note
+      e.dataTransfer?.setData('application/json', JSON.stringify(payload));
+      e.dataTransfer?.setDragImage((e.currentTarget as HTMLElement), 10, 10);
+    }catch{}
+  }} on:dragend={(e)=>{ setTimeout(()=>{ dragging = false; }, 0); }}
+  class="card {variant}" class:selected={selected} class:playing={isPlaying} class:loaded={isLoaded}
+  on:mousedown={(e)=>{ if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }} on:click={onCardClick} on:keydown={onCardKey} aria-selected={selected} tabindex="0">
   <div class="header">
     <p class="title">{note.title || note.filename.replace(/\.\w+$/i,'')}</p>
     <small class="meta">{note.date}{#if note.length_seconds} • {note.length_seconds}s{/if}</small>
@@ -122,7 +143,7 @@
   </div>
 
   <div class="tag-editor" class:hide={variant==='compact'}>
-    <input aria-label="New tag" placeholder="Add tag" bind:value={newTagLabel} />
+    <input aria-label="New tag" placeholder="Add tag" bind:value={newTagLabel} on:click|stopPropagation on:mousedown|stopPropagation />
     <button type="button" aria-label="Selected color" class="color" on:click|stopPropagation={() => (showPalette = !showPalette)} style="background:{newTagColor};"></button>
     {#if showPalette}
       <div class="palette" on:click|stopPropagation>
@@ -133,7 +154,14 @@
     {/if}
     <button on:click|stopPropagation={addTag} class="add">Add</button>
   </div>
-  <audio controls src="{`${BACKEND_URL}/voice_notes/${note.filename}`}"></audio>
+  <AudioPlayer
+    src={`${BACKEND_URL}/voice_notes/${note.filename}`}
+    on:play={() => (isPlaying = true)}
+    on:pause={() => (isPlaying = false)}
+    on:ended={() => (isPlaying = false)}
+    on:loaded={() => (isLoaded = true)}
+    on:emptied={() => { isLoaded = false; isPlaying = false; }}
+  />
   <blockquote class="text" on:mousedown={(e) => { if (!expanded) { e.preventDefault(); } }}>
     <p class:clamp={variant==='compact' && !expanded} class:selectable={expanded} class:noselect={!expanded}>
       {#if note.transcription}
@@ -155,7 +183,7 @@
 </li>
 
 <style>
-  .card { position: relative; margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px; cursor: pointer; }
+  .card { position: relative; margin-bottom: 1.5rem; padding: 1rem; background-color: #f1f3f4; border-radius: 8px; cursor: pointer; outline: 2px solid transparent; outline-offset: 0; transition: outline-color 120ms ease, box-shadow 120ms ease; }
   .card.compact { margin-bottom: .75rem; padding: .6rem .7rem; }
   .header { display:flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
   .title { margin:0; font-weight: 600; font-size: 1rem; }
@@ -167,11 +195,11 @@
   .tag .tag-x { background:none; border:none; cursor:pointer; color:#fff; }
   .tag-editor { display:flex; gap:.5rem; align-items:center; margin-bottom:.5rem; flex-wrap: wrap; position: relative; }
   .tag-editor.hide { display:none; }
-  .tag-editor input { flex:1; min-width:140px; padding:.35rem .5rem; border:1px solid #e5e7eb; border-radius:6px; }
+  .tag-editor input { flex: 0 1 220px; width: 220px; min-width: 140px; padding:.35rem .5rem; border:1px solid #e5e7eb; border-radius:6px; }
   .tag-editor .color { width:26px; height:26px; border-radius:50%; border:2px solid #111; cursor:pointer; }
   .tag-editor .palette { position:absolute; right:64px; bottom:40px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:6px; display:flex; gap:6px; box-shadow:0 10px 20px rgba(0,0,0,0.08); }
   .tag-editor .palette button { width:22px; height:22px; border-radius:50%; border:2px solid #fff; cursor:pointer; }
-  audio { width:100%; margin-bottom:.5rem; }
+  /* custom audio player replaces native controls */
   .text { background-color:#fff; padding:.5rem 1rem; border-left:5px solid #4285f4; margin:0; border-radius:4px; }
   .text p { margin: .25rem 0; }
   .text p.noselect { user-select: none; -webkit-user-select: none; -ms-user-select: none; }
@@ -181,5 +209,14 @@
   .actions { margin-top: 10px; display:flex; gap:.5rem; }
   .actions .primary { background-color:#4285f4; color:#fff; padding:.5rem 1rem; border:none; border-radius:4px; cursor:pointer; }
   .actions .danger { background-color:#db4437; color:#fff; padding:.5rem 1rem; border:none; border-radius:4px; cursor:pointer; }
-  .card.selected { outline: 2px solid #3B82F6; outline-offset: 0; }
+  /* Hover state: light blue border to indicate selectability */
+  .card:hover { outline-color: #93C5FD; /* tailwind sky-300 */ }
+  /* Keyboard focus mirrors hover for accessibility */
+  .card:focus-visible { outline-color: #93C5FD; box-shadow: 0 0 0 3px rgba(147,197,253,0.35); }
+  /* Selected state: solid primary blue border */
+  .card.selected { outline-color: #3B82F6; /* tailwind blue-500 */ }
+
+  /* Complementary text accent while loaded/playing, without fighting selection outline */
+  .card.loaded:not(.playing) .text { border-left-color:#93C5FD; }
+  .card.playing .text { border-left-color:#10B981; }
 </style>
