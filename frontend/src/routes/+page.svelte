@@ -25,7 +25,9 @@
   let audioChunks: Blob[] = [];
   let notes: Note[] = [];
   let filteredNotes: Note[] = [];
-  // folders removed in simplified view
+  let folders: { name: string; count: number }[] = [];
+  // Folder navigation: '__UNFILED__' for inbox, '__ALL__' for all, or folder name
+  let selectedFolder: string = '__UNFILED__';
   let expandedNotes: Set<string> = new Set();
   let selectedNotes: Set<string> = new Set();
   let toastMessage = '';
@@ -94,6 +96,13 @@
     applyFilters();
   }
 
+  async function loadFolders() {
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/folders`);
+      if (r.ok) folders = await r.json();
+    } catch {}
+  }
+
   function applyFilters() {
     const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
     const to = filters.dateTo ? new Date(filters.dateTo) : null;
@@ -108,6 +117,12 @@
 
     console.log('[applyFilters] filters', filters);
     filteredNotes = notes.filter((n) => {
+      // Folder filter
+      if (selectedFolder === '__UNFILED__') {
+        if ((n as any).folder && (n as any).folder.trim() !== '') return false;
+      } else if (selectedFolder && selectedFolder !== '__ALL__') {
+        if ((n as any).folder !== selectedFolder) return false;
+      }
       let len: number | null = null;
       if (typeof n.length_seconds === 'number' && Number.isFinite(n.length_seconds)) {
         len = n.length_seconds;
@@ -258,7 +273,7 @@
         applyFilters();
         // Fill missing durations in the background for better filtering UX
         ensureDurations();
-        // no folder refresh
+        loadFolders();
       } else {
         console.error('Failed to fetch notes:', response.statusText);
       }
@@ -474,6 +489,41 @@
     }, 2000) as unknown as number;
   }
 
+  async function moveSelectedToFolder(folder: string, filenames: string[]) {
+    try {
+      await Promise.all(
+        filenames.map((filename) =>
+          fetch(`${BACKEND_URL}/api/notes/${filename}/folder`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder })
+          })
+        )
+      );
+    } catch (e) {
+      console.error('Move to folder failed', e);
+    } finally {
+      await getNotes();
+      await loadFolders();
+      applyFilters();
+    }
+  }
+
+  async function createFolder(name: string) {
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/folders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      if (!r.ok) throw new Error('create failed');
+      await loadFolders();
+    } catch (e) {
+      console.error('Create folder failed', e);
+    }
+  }
+
+  async function createFolderAndMove(name: string, filenames: string[]) {
+    await createFolder(name);
+    await moveSelectedToFolder(name, filenames);
+  }
+
 </script>
 
 <main class="page">
@@ -553,24 +603,59 @@
     </div>
   </div>
 
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <button class="crumb" class:active={selectedFolder==='__ALL__'} on:click={()=>{ selectedFolder='__ALL__'; applyFilters(); }}>All</button>
+    {#if selectedFolder === '__UNFILED__'}
+      <span class="sep">&gt;</span>
+      <span class="crumb current">Unfiled</span>
+    {:else if selectedFolder !== '__ALL__'}
+      <span class="sep">&gt;</span>
+      <span class="crumb current">{selectedFolder}</span>
+    {/if}
+  </nav>
+
   <NotesList
     notes={filteredNotes}
     {expandedNotes}
     {selectedNotes}
     {layout}
+    {folders}
+    showFolders={selectedFolder==='__ALL__' || selectedFolder==='__UNFILED__'}
     on:toggle={(e) => toggleExpand(e.detail)}
     on:copy={(e) => copyToClipboard(e.detail)}
     on:delete={(e) => deleteNote(e.detail)}
     on:select={handleSelectNote}
+    on:moveToFolder={(e) => moveSelectedToFolder(e.detail.folder, e.detail.filenames)}
+    on:createFolder={(e) => createFolder(e.detail.name)}
+    on:createFolderAndMove={(e) => createFolderAndMove(e.detail.name, e.detail.filenames)}
+    on:deleteFolder={async (e) => {
+      try {
+        const n = encodeURIComponent(e.detail.name);
+        const r = await fetch(`${BACKEND_URL}/api/folders/${n}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error('delete failed');
+        await getNotes();
+        await loadFolders();
+      } catch (err) { console.error('Delete folder failed', err); }
+    }}
+    on:openFolder={(e) => { selectedFolder = e.detail.name; applyFilters(); }}
   />
 
   <BulkActions
     selectedCount={selectedNotes.size}
     {isBulkDeleting}
+    folders={folders.map(f=>f.name)}
     on:deleteSelected={deleteSelectedNotes}
     on:createNarrative={createNarrative}
     on:selectAll={() => { selectedNotes = new Set(filteredNotes.map((n) => n.filename)); }}
     on:clearSelection={() => { selectedNotes.clear(); selectedNotes = new Set(selectedNotes); lastSelectedIndex = null; }}
+    on:bulkMove={async (e) => {
+      const filenames = Array.from(selectedNotes);
+      if (filenames.length === 0) return;
+      await moveSelectedToFolder(e.detail.folder, filenames);
+      // Keep selection consistent
+      selectedNotes.clear();
+      selectedNotes = new Set(selectedNotes);
+    }}
   />
 </main>
 
@@ -637,4 +722,8 @@
   /* Filters moved to FiltersBar component */
 
   /* simplified layout */
+  .breadcrumbs { display:flex; align-items:center; gap:.35rem; margin:.5rem 0; color:#374151; }
+  .crumb { background:none; border:none; color:#374151; cursor:pointer; padding:0; font-size:.95rem; }
+  .crumb.active, .crumb.current { font-weight:600; color:#4338ca; }
+  .sep { color:#9ca3af; }
 </style>

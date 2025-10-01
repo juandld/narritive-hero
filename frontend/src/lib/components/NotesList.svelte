@@ -1,12 +1,15 @@
 <script lang="ts">
   import NoteItem from './NoteItem.svelte';
+  import FolderCard from './FolderCard.svelte';
+  import NewFolderCard from './NewFolderCard.svelte';
   import { createEventDispatcher } from 'svelte';
 
   export let notes: any[];
   export let expandedNotes: Set<string>;
   export let selectedNotes: Set<string>;
   export let layout: 'list' | 'compact' | 'grid3' = 'list';
-  // no folder cards in this simplified view
+  export let folders: { name: string; count: number }[] = [];
+  export let showFolders: boolean = true;
 
   const dispatch = createEventDispatcher();
 
@@ -26,6 +29,16 @@
     dispatch('select', event.detail);
   }
 </script>
+
+{#if showFolders}
+  <h2>Folders</h2>
+  <ul class:as-grid={layout === 'grid3'} class:compact={layout !== 'list'}>
+    <NewFolderCard on:create={(e)=>dispatch('createFolder', e.detail)} on:createAndMove={(e)=>dispatch('createFolderAndMove', e.detail)} />
+    {#each folders as f}
+      <FolderCard name={f.name} count={f.count} layout={layout === 'list' ? 'full' : 'compact'} on:moveToFolder={(e)=>dispatch('moveToFolder', e.detail)} on:delete={(e)=>dispatch('deleteFolder', e.detail)} on:open={(e)=>dispatch('openFolder', e.detail)} />
+    {/each}
+  </ul>
+{/if}
 
 <h2>Saved Notes</h2>
 {#if notes.length > 0}
@@ -50,6 +63,7 @@
 
 <style>
   ul { list-style: none; padding: 0; margin: 0; }
+  h2 { margin: .75rem 0 .5rem 0; font-size: 1.1rem; }
   ul.as-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

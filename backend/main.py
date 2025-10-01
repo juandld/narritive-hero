@@ -151,7 +151,23 @@ async def update_folder(filename: str, payload: FolderUpdate):
     base_filename = os.path.splitext(filename)[0]
     json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
     if not os.path.exists(json_path):
-        return Response(status_code=404)
+        # Create a minimal JSON so folder assignment works even before transcription
+        try:
+            audio_path = os.path.join(VOICE_NOTES_DIR, filename)
+            if not os.path.exists(audio_path):
+                # try to find by any known extension
+                for ext in ('.wav', '.ogg', '.webm', '.m4a', '.mp3'):
+                    p = os.path.join(VOICE_NOTES_DIR, base_filename + ext)
+                    if os.path.exists(p):
+                        audio_path = p
+                        filename = os.path.basename(p)
+                        break
+            import note_store as _ns
+            # Use base as title, empty transcription (will be filled when background task runs)
+            payload_min = _ns.build_note_payload(filename, base_filename, "")
+            _ns.save_note_json(base_filename, payload_min)
+        except Exception:
+            return Response(status_code=404)
     try:
         import json
         with open(json_path, 'r') as f:
@@ -499,11 +515,36 @@ async def create_or_update_format(request: Request):
 
 # ----------------- Folders API -----------------
 
+def _folders_registry_path() -> str:
+    os.makedirs(config.FOLDERS_DIR, exist_ok=True)
+    return os.path.join(config.FOLDERS_DIR, "folders.json")
+
+def _load_folders_registry() -> list[str]:
+    try:
+        p = _folders_registry_path()
+        if not os.path.exists(p):
+            return []
+        with open(p, "r") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [str(x) for x in data if isinstance(x, str)]
+        return []
+    except Exception:
+        return []
+
+def _save_folders_registry(names: list[str]) -> None:
+    p = _folders_registry_path()
+    tmp = p + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sorted(list({n.strip(): None for n in names if n and isinstance(n, str)}.keys()), key=lambda s: s.lower()), f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
 @app.get("/api/folders")
 async def list_folders():
-    """Return a list of folders with counts, derived from note JSONs."""
+    """Return a list of folders with counts, combining registry + derived from note JSONs."""
     os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
-    counts = {}
+    counts: dict[str, int] = {}
     for fn in os.listdir(TRANSCRIPTS_DIR):
         if not fn.endswith('.json'):
             continue
@@ -515,8 +556,59 @@ async def list_folders():
                 counts[folder] = counts.get(folder, 0) + 1
         except Exception:
             continue
+    # include zero-count folders from registry
+    reg = _load_folders_registry()
+    for n in reg:
+        counts.setdefault(n, 0)
     out = [{"name": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: kv[0].lower())]
     return out
+
+@app.post("/api/folders")
+async def create_folder(request: Request):
+    try:
+        body = await request.json()
+        name = str((body or {}).get("name") or "").strip()
+        if not name:
+            return Response(status_code=400)
+        # basic sanitation: disallow path separators
+        if "/" in name or "\\" in name:
+            return Response(status_code=400)
+        reg = _load_folders_registry()
+        if name not in reg:
+            reg.append(name)
+            _save_folders_registry(reg)
+        return {"name": name}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.delete("/api/folders/{name}")
+async def delete_folder(name: str):
+    """Delete a folder and clear it from any notes using it."""
+    try:
+        clean = (name or "").strip()
+        reg = _load_folders_registry()
+        if clean in reg:
+            reg = [n for n in reg if n != clean]
+            _save_folders_registry(reg)
+        # Clear from notes
+        cleared = 0
+        for fn in os.listdir(TRANSCRIPTS_DIR):
+            if not fn.endswith('.json'):
+                continue
+            jp = os.path.join(TRANSCRIPTS_DIR, fn)
+            try:
+                with open(jp, 'r') as f:
+                    data = json.load(f)
+                if (data.get('folder') or '').strip() == clean:
+                    data['folder'] = ""
+                    with open(jp, 'w') as f:
+                        json.dump(data, f, ensure_ascii=False)
+                    cleared += 1
+            except Exception:
+                continue
+        return {"deleted": clean, "cleared": cleared}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.delete("/api/formats/{fid}")

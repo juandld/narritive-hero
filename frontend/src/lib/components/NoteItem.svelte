@@ -117,9 +117,17 @@
       const payload = { filenames };
       // Fallback: if global not set, include just this note
       e.dataTransfer?.setData('application/json', JSON.stringify(payload));
-      e.dataTransfer?.setDragImage((e.currentTarget as HTMLElement), 10, 10);
+      // Custom drag image with count
+      const count = filenames.length;
+      const ghost = document.createElement('div');
+      ghost.style.cssText = 'position:fixed; top:-1000px; left:-1000px; padding:6px 10px; background:#111; color:#fff; border-radius:9999px; font-size:12px;';
+      ghost.textContent = count > 1 ? `${count} notes` : `1 note`;
+      document.body.appendChild(ghost);
+      e.dataTransfer?.setDragImage(ghost, 10, 10);
+      setTimeout(()=>{ try{ document.body.removeChild(ghost); }catch{} }, 0);
+      document.body.classList.add('dragging-notes');
     }catch{}
-  }} on:dragend={(e)=>{ setTimeout(()=>{ dragging = false; }, 0); }}
+  }} on:dragend={(e)=>{ setTimeout(()=>{ dragging = false; document.body.classList.remove('dragging-notes'); }, 0); }}
   class="card {variant}" class:selected={selected} class:playing={isPlaying} class:loaded={isLoaded}
   on:mousedown={(e)=>{ if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }} on:click={onCardClick} on:keydown={onCardKey} aria-selected={selected} tabindex="0">
   <div class="header">
@@ -219,4 +227,6 @@
   /* Complementary text accent while loaded/playing, without fighting selection outline */
   .card.loaded:not(.playing) .text { border-left-color:#93C5FD; }
   .card.playing .text { border-left-color:#10B981; }
+  /* Dragging visuals */
+  :global(body.dragging-notes) .card.selected { opacity: .6; }
 </style>
