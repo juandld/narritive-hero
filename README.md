@@ -31,6 +31,7 @@ A web app to record voice notes and turn them into organized, searchable narrati
   - `storage/transcriptions/` — one JSON per note (metadata + text)
   - `storage/narratives/` — generated narratives (`.txt`)
 - Frontend dev server: `http://localhost:5173`
+- Narratives page: `http://localhost:5173/narratives`
 - Backend dev server: `http://localhost:8000`
 - Docker: frontend on `:80`, backend on `:8000`
 
@@ -234,12 +235,13 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
   - PATCH `/api/notes/{filename}/folder` → `{ "folder": "…" }` assign or clear a folder
 - Narratives
   - GET `/api/narratives` → list filenames
-  - GET `/api/narratives/{filename}` → `{ content }`
+  - GET `/api/narratives/{filename}` → `{ content, title? }` (title is AI-generated and stored as metadata)
   - DELETE `/api/narratives/{filename}`
   - POST `/api/narratives` → body `[{"filename":"…wav"}, …]` creates concatenated narrative (simple join)
-  - POST `/api/narratives/generate` → generate via LLM
+  - POST `/api/narratives/generate` → generate via LLM (auto-titles the narrative and saves metadata)
     - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
-    - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`
+    - Includes each note's `date` alongside its `title` and text in the prompt context.
+    - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`.
 
 - Formats (optional saved prompts for generation)
   - GET `/api/formats` → list saved formats `{ id, title, prompt }`
@@ -264,7 +266,7 @@ Open API docs: visit `http://localhost:8000/docs`.
 - NoteItem: tag chips with compact color picker, preview snippet, expand/collapse
 - Config: `frontend/src/lib/config.ts` hosts `BACKEND_URL`
 
-Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container.
+Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container. Use the top bar “Narratives” to open the full narratives page.
 
 ## Troubleshooting
 

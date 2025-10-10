@@ -32,48 +32,48 @@
 <div class="filters">
   <div class="field">
     <label for="f-date-from">Date from</label>
-    <input id="f-date-from" type="date" value={filters.dateFrom} on:change={(e) => { filters = { ...filters, dateFrom: (e.target as HTMLInputElement).value }; emit(); }} />
+    <input id="f-date-from" type="date" value={filters.dateFrom} onchange={(e) => { filters = { ...filters, dateFrom: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-date-to">Date to</label>
-    <input id="f-date-to" type="date" value={filters.dateTo} on:change={(e) => { filters = { ...filters, dateTo: (e.target as HTMLInputElement).value }; emit(); }} />
+    <input id="f-date-to" type="date" value={filters.dateTo} onchange={(e) => { filters = { ...filters, dateTo: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-topics">Topics</label>
-    <input id="f-topics" placeholder="e.g. meeting, travel" value={filters.topics} on:input={(e) => { filters = { ...filters, topics: (e.target as HTMLInputElement).value }; emit(); }} />
+    <input id="f-topics" placeholder="e.g. meeting, travel" value={filters.topics} oninput={(e) => { filters = { ...filters, topics: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-min">Min sec</label>
-    <input id="f-min" type="number" min="0" value={filters.minLen} on:input={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, minLen: v === '' ? '' : Number(v) as any }; emit(); }} />
+    <input id="f-min" type="number" min="0" value={filters.minLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, minLen: v === '' ? '' : Number(v) as any }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-max">Max sec</label>
-    <input id="f-max" type="number" min="0" value={filters.maxLen} on:input={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, maxLen: v === '' ? '' : Number(v) as any }; emit(); }} />
+    <input id="f-max" type="number" min="0" value={filters.maxLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, maxLen: v === '' ? '' : Number(v) as any }; emit(); }} />
   </div>
   <div class="field search">
     <label for="f-search">Search</label>
-    <input id="f-search" placeholder="search title or text" value={filters.search} on:input={(e) => { filters = { ...filters, search: (e.target as HTMLInputElement).value }; emit(); }} />
+    <input id="f-search" placeholder="search title or text" value={filters.search} oninput={(e) => { filters = { ...filters, search: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-sort">Sort by</label>
     <div class="sort-row">
-      <select id="f-sort" bind:value={filters.sortKey} on:change={() => { filters = { ...filters }; emit(); }}>
+      <select id="f-sort" bind:value={filters.sortKey} onchange={() => { filters = { ...filters }; emit(); }}>
         <option value="date">Date</option>
         <option value="type">Type</option>
         <option value="length">Length</option>
         <option value="language">Language</option>
       </select>
-      <select bind:value={filters.sortDir} on:change={() => { filters = { ...filters }; emit(); }}>
+      <select bind:value={filters.sortDir} onchange={() => { filters = { ...filters }; emit(); }}>
         <option value="asc">Asc</option>
         <option value="desc">Desc</option>
       </select>
     </div>
   </div>
   <div class="actions">
-    <button type="button" class="reset-button" on:click={reset}>Reset Filters</button>
+    <button type="button" class="reset-button" onclick={reset}>Reset Filters</button>
     <div class="select-actions">
-      <button type="button" class="sel" title="Select all filtered" on:click={selectAll}>Select all ({counts.filtered})</button>
-      <button type="button" class="sel" title="Clear selection" on:click={clearSelection}>Clear</button>
+      <button type="button" class="sel" title="Select all filtered" onclick={selectAll}>Select all ({counts.filtered})</button>
+      <button type="button" class="sel" title="Clear selection" onclick={clearSelection}>Clear</button>
     </div>
     <div class="results-info">{counts.filtered} of {counts.total}</div>
   </div>

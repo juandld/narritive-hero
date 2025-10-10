@@ -201,7 +201,7 @@ def get_notes():
             notes.append({
                 "filename": filename,
                 "transcription": transcription,  # likely None
-                "title": title,  # likely None (frontend will fallback to filename)
+                "title": (title or base_filename),
                 "date": date_str,
                 "length_seconds": length_sec,
                 "topics": [],
@@ -212,10 +212,14 @@ def get_notes():
         else:
             data = note_store.ensure_metadata_in_json(base_filename, data)
 
+        # Normalize title: avoid placeholder values
+        _title = (title or data.get("title") or "").strip()
+        if not _title or _title.lower() in ("untitled", "title generation failed."):
+            _title = base_filename
         notes.append({
             "filename": data.get("filename") or filename,
             "transcription": transcription,
-            "title": title,
+            "title": _title,
             "date": data.get("date"),
             "length_seconds": data.get("length_seconds"),
             "topics": data.get("topics", []),
@@ -240,10 +244,13 @@ def get_notes():
             except Exception:
                 pass
             # Use JSON content directly
+            _title2 = (str(data.get("title") or "")).strip() or base
+            if _title2.lower() in ("untitled", "title generation failed."):
+                _title2 = base
             notes.append({
                 "filename": str(data.get("filename") or base + ".txt"),
                 "transcription": data.get("transcription"),
-                "title": data.get("title") or base,
+                "title": _title2,
                 "date": data.get("date"),
                 "length_seconds": data.get("length_seconds"),
                 "topics": data.get("topics", []),

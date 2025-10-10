@@ -26,6 +26,7 @@ import uuid
 import asyncio
 from langchain_core.messages import HumanMessage
 import providers
+import note_store as _ns
 import config
 import note_store as _note_store
 
@@ -49,6 +50,7 @@ app.add_middleware(
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 NARRATIVES_DIR = config.NARRATIVES_DIR
+NARRATIVE_META_DIR = os.path.join(NARRATIVES_DIR, 'meta')
 FORMATS_DIR = getattr(config, 'FORMATS_DIR', os.path.join(config.STORAGE_DIR, 'formats'))
 
 # Mount static files directory for voice notes
@@ -181,12 +183,14 @@ async def create_text_note(request: Request):
                 try:
                     title = providers.title_with_openai(transcription)
                 except Exception:
-                    title = "Untitled"
+                    # Fallback: derive from transcription snippet instead of id
+                    words = (transcription or '').strip().split()
+                    title = ' '.join(words[:8]) if words else 'Text Note'
 
         # Build payload similar to build_note_payload but without audio metadata
         data = {
             "filename": pseudo_filename,
-            "title": title or "Untitled",
+            "title": (title or '').strip() or 'Text Note',
             "transcription": transcription,
             "date": date_override or datetime.now().strftime('%Y-%m-%d'),
             "length_seconds": None,
@@ -275,7 +279,17 @@ async def get_narrative(filename: str):
     if os.path.exists(path):
         with open(path, 'r') as f:
             content = f.read()
-        return {"content": content}
+        # Try to include a generated/display title if available
+        title = None
+        try:
+            mp = os.path.join(NARRATIVE_META_DIR, f"{filename}.json")
+            if os.path.exists(mp):
+                with open(mp, 'r') as mf:
+                    md = json.load(mf)
+                title = (md or {}).get('title')
+        except Exception:
+            title = None
+        return {"content": content, "title": title}
     return Response(status_code=404)
 
 @app.delete("/api/narratives/{filename}")
@@ -320,8 +334,44 @@ async def create_narrative_from_notes(request: Request):
         from datetime import datetime
         name = f"narrative-{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         out = os.path.join(NARRATIVES_DIR, name)
+        content = "\n".join(parts)
         with open(out, 'w') as f:
-            f.write("\n".join(parts))
+            f.write(content)
+        # Generate a short title for this narrative and save metadata
+        try:
+            os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+            # Prefer first heading or first non-empty line as quick baseline
+            title = None
+            for ln in content.splitlines():
+                s = (ln or '').strip()
+                if not s: continue
+                if s.startswith('#'):
+                    s = s.lstrip('#').strip()
+                title = s
+                break
+            # Refine via LLM if possible
+            if title:
+                try:
+                    msg = HumanMessage(content=[{"type": "text", "text": (
+                        "Return exactly one short title (5–8 words) for the narrative below. "
+                        "Do not include quotes, bullets, markdown, or extra text. Output only the title on one line.\n\n" + content[:4000]
+                    )}])
+                    resp, _ = await asyncio.to_thread(providers.invoke_google, [msg])
+                    title_llm = providers.normalize_title_output(getattr(resp, 'content', ''))
+                    if title_llm:
+                        title = title_llm
+                except Exception:
+                    try:
+                        from langchain_core.messages import HumanMessage as _HM
+                        title = providers.title_with_openai(content[:4000]) or title
+                    except Exception:
+                        pass
+            if not title:
+                title = os.path.splitext(name)[0]
+            with open(os.path.join(NARRATIVE_META_DIR, f"{name}.json"), 'w') as mf:
+                json.dump({"title": title}, mf, ensure_ascii=False)
+        except Exception:
+            pass
         return {"filename": name}
     except Exception as e:
         return {"error": str(e)}
@@ -358,25 +408,108 @@ async def generate_narrative(request: Request):
         format_ids = (body or {}).get("format_ids") or []
         format_prompt_inline = (body or {}).get("format_prompt")
 
-        # Collect sources
+        # Collect sources (notes or existing narratives) with diagnostics
         if not isinstance(items, list):
             return Response(status_code=400)
         sources = []
+        dbg_sources = []  # diagnostics for user: title/date/length/preview per source
         for it in items:
             name = (it or {}).get("filename")
             if not name or not isinstance(name, str):
                 continue
             base = os.path.splitext(name)[0]
-            json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
             title = base
             text = ""
-            if os.path.exists(json_path):
-                import json
-                with open(json_path, "r") as jf:
-                    data = json.load(jf)
-                title = data.get("title") or title
-                text = data.get("transcription") or ""
-            sources.append((title, text))
+            date_str = ""
+            kind = "note"
+            if name.lower().endswith('.txt'):
+                # If it's a real narrative file, use its content; otherwise, treat as note JSON-only
+                narr_path = os.path.join(NARRATIVES_DIR, name)
+                if os.path.exists(narr_path):
+                    try:
+                        with open(narr_path, 'r') as nf:
+                            text = nf.read()
+                    except Exception:
+                        text = ""
+                    # try meta title/date
+                    try:
+                        mp = os.path.join(NARRATIVE_META_DIR, f"{name}.json")
+                        if os.path.exists(mp):
+                            with open(mp, 'r') as mf:
+                                md = json.load(mf)
+                            title = md.get('title') or title
+                            date_str = (md.get('date') or '').strip()
+                    except Exception:
+                        pass
+                    kind = "narrative"
+                else:
+                    # Fall back to note JSON by base name
+                    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
+                    if os.path.exists(json_path):
+                        import json
+                        with open(json_path, "r") as jf:
+                            data = json.load(jf)
+                        title = data.get("title") or title
+                        text = data.get("transcription") or ""
+                        date_str = (data.get("date") or "").strip()
+                    kind = "note"
+            else:
+                # Note JSON source
+                json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
+                if os.path.exists(json_path):
+                    import json
+                    with open(json_path, "r") as jf:
+                        data = json.load(jf)
+                    title = data.get("title") or title
+                    text = data.get("transcription") or ""
+                    date_str = (data.get("date") or "").strip()
+                # If date missing, derive from audio mtime or filename pattern
+                if not date_str:
+                    try:
+                        ap = None
+                        try:
+                            ap = _ns._find_audio_path(base, data if 'data' in locals() else {})
+                        except Exception:
+                            ap = None
+                        if ap and os.path.exists(ap):
+                            mtime = os.path.getmtime(ap)
+                            date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+                        else:
+                            # Try parsing YYYYMMDD from base
+                            import re
+                            m = re.match(r"^(\\d{4})(\\d{2})(\\d{2})", base)
+                            if m:
+                                date_str = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+                    except Exception:
+                        pass
+            # Normalize low-quality titles like id-looking placeholders
+            try:
+                if (not title) or title.lower() in ("untitled", "title generation failed."):
+                    title = (text or '').strip().split('\n', 1)[0].strip() or (title or '')
+                import re as _re
+                if _re.fullmatch(r"text-\d{14,}-[a-f0-9]{4,}", title or ''):
+                    # derive from first words of content
+                    head = ' '.join(((text or '').strip().split() or [])[:8]).strip()
+                    title = head or 'Text Note'
+            except Exception:
+                pass
+            # Build diagnostics for this source
+            try:
+                preview = (text or '').strip().replace("\n", " ")[:140]
+                dbg_sources.append({
+                    "kind": kind,
+                    "filename": name,
+                    "title": (title or '')[:120],
+                    "date": date_str or "",
+                    "text_len": len(text or ''),
+                    "text_preview": preview,
+                })
+            except Exception:
+                pass
+            # Skip entirely empty entries
+            if not (text or '').strip():
+                continue
+            sources.append({"title": title, "text": text, "date": date_str or ""})
 
         if not sources and not extra_text.strip():
             return Response(status_code=400)
@@ -414,12 +547,21 @@ async def generate_narrative(request: Request):
         except Exception:
             pass
         parts.append("\n\nContext Notes:\n")
-        for i, (title, text) in enumerate(sources, start=1):
-            parts.append(f"[{i}] {title}\n{text}\n")
+        for i, src in enumerate(sources, start=1):
+            t = src.get("title")
+            tx = src.get("text") or ""
+            d = (src.get("date") or "").strip()
+            header = f"[{i}] {d} — {t}" if d else f"[{i}] {t}"
+            parts.append(f"{header}\n{tx}\n")
         if extra_text.strip():
             parts.append("\nAdditional Context:\n" + extra_text.strip() + "\n")
         parts.append("\nWrite the narrative now.")
         prompt_text = "\n".join(parts)
+        try:
+            logging.info("[gen] items=%s sources=%s", len(items), json.dumps(dbg_sources)[:2000])
+            logging.info("[gen] prompt_head=%s", (prompt_text[:800] + ('…' if len(prompt_text)>800 else '')))
+        except Exception:
+            pass
 
         # Call provider
         content = None
@@ -453,6 +595,41 @@ async def generate_narrative(request: Request):
         out = os.path.join(NARRATIVES_DIR, name)
         with open(out, "w") as f:
             f.write(content or "")
+
+        # Generate and persist a short display title for this narrative
+        try:
+            os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+            title = None
+            # Prefer first heading or first non-empty line if model fails
+            for ln in (content or '').splitlines():
+                s = (ln or '').strip()
+                if not s: continue
+                if s.startswith('#'):
+                    s = s.lstrip('#').strip()
+                title = s
+                break
+            try:
+                msg = HumanMessage(content=[{"type": "text", "text": (
+                    "Return exactly one short title (5–8 words) for the narrative below. "
+                    "Do not include quotes, bullets, markdown, or extra text. Output only the title on one line.\n\n" + (content or '')[:4000]
+                )}])
+                resp, _ = await asyncio.to_thread(providers.invoke_google, [msg])
+                title_llm = providers.normalize_title_output(getattr(resp, 'content', ''))
+                if title_llm:
+                    title = title_llm
+            except Exception:
+                try:
+                    title_oa = providers.title_with_openai((content or '')[:4000])
+                    if title_oa:
+                        title = title_oa
+                except Exception:
+                    pass
+            if not title:
+                title = os.path.splitext(name)[0]
+            with open(os.path.join(NARRATIVE_META_DIR, f"{name}.json"), 'w') as mf:
+                json.dump({"title": title}, mf, ensure_ascii=False)
+        except Exception:
+            pass
 
         # --- Version threading: record parent→child relationship ---
         try:
@@ -592,6 +769,73 @@ async def create_or_update_format(request: Request):
         return {'id': fid}
     except Exception as e:
         return {"error": str(e)}
+
+
+# ----------------- Narrative Folders API -----------------
+
+def _narrative_meta_path(filename: str) -> str:
+    os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+    return os.path.join(NARRATIVE_META_DIR, f"{filename}.json")
+
+def _read_narrative_meta(filename: str) -> dict:
+    try:
+        p = _narrative_meta_path(filename)
+        if os.path.exists(p):
+            with open(p, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _write_narrative_meta(filename: str, data: dict) -> None:
+    os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+    p = _narrative_meta_path(filename)
+    tmp = p + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data or {}, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+@app.get("/api/narratives/list")
+async def list_narratives_meta():
+    os.makedirs(NARRATIVES_DIR, exist_ok=True)
+    files = [f for f in sorted(os.listdir(NARRATIVES_DIR)) if f.endswith('.txt')]
+    out = []
+    for fn in files:
+        meta = _read_narrative_meta(fn)
+        out.append({
+            'filename': fn,
+            'title': meta.get('title'),
+            'folder': (meta.get('folder') or '').strip(),
+        })
+    return out
+
+@app.patch("/api/narratives/{filename}/folder")
+async def set_narrative_folder(filename: str, request: Request):
+    try:
+        body = await request.json()
+        folder = str((body or {}).get('folder') or '').strip()
+        meta = _read_narrative_meta(filename)
+        meta['folder'] = folder
+        _write_narrative_meta(filename, meta)
+        return { 'status': 'ok', 'folder': folder }
+    except Exception as e:
+        return { 'error': str(e) }
+
+@app.get("/api/narratives/folders")
+async def list_narrative_folders():
+    os.makedirs(NARRATIVES_DIR, exist_ok=True)
+    files = [f for f in sorted(os.listdir(NARRATIVES_DIR)) if f.endswith('.txt')]
+    counts: dict[str,int] = {}
+    for fn in files:
+        try:
+            meta = _read_narrative_meta(fn)
+            folder = (meta.get('folder') or '').strip()
+            if folder:
+                counts[folder] = counts.get(folder, 0) + 1
+        except Exception:
+            continue
+    out = [{ 'name': k, 'count': v } for k,v in sorted(counts.items(), key=lambda kv: kv[0].lower())]
+    return out
 
 
 # ----------------- Folders API -----------------

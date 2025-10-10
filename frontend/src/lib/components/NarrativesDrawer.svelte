@@ -18,6 +18,7 @@
   import NarrativeIterateModal from './NarrativeIterateModal.svelte';
 
   let isIterateOpen: boolean = false;
+  let isGenerating: boolean = false;
   let selectedExcerpt: string = '';
   let renderEl: HTMLDivElement | null = null;
   let thread: { files: string[]; index: number } = { files: [], index: 0 };
@@ -41,7 +42,7 @@
       const response = await fetch(`${BACKEND_URL}/api/narratives/${filename}`);
       if (response.ok) {
         const data = await response.json();
-        selectedNarrative = { filename, content: data.content };
+        selectedNarrative = { filename, content: data.content, title: (data as any).title } as any;
         try {
           const tr = await fetch(`${BACKEND_URL}/api/narratives/thread/${filename}`);
           if (tr.ok) {
@@ -233,14 +234,17 @@
       <div class="narrative-content">
         {#if selectedNarrative}
           <div class="content-header">
-            <h3 class="filename">{selectedNarrative.filename}</h3>
+            <h3 class="filename">{selectedNarrative.title || selectedNarrative.filename}</h3>
             <div class="toolbar">
-              <button class="btn" title="Previous version" on:click={() => gotoVersion(-1)} disabled={thread.index <= 0}>◀</button>
+              <button class="btn" title="Previous version" on:click={() => gotoVersion(-1)} disabled={thread.index <= 0 || isGenerating}>◀</button>
               <span class="ver">v {thread.index + 1}/{Math.max(thread.files.length, 1)}</span>
-              <button class="btn" title="Next version" on:click={() => gotoVersion(1)} disabled={thread.index >= thread.files.length - 1}>▶</button>
-              <button class="btn primary" on:click={() => (isIterateOpen = true)}>Iterate</button>
-              <button class="btn" on:click={() => (isIterateOpen = true)} disabled={!selectedExcerpt}>Iterate Selection</button>
-              <button class="btn danger" on:click={() => deleteNarrative(selectedNarrative!.filename)}>Delete</button>
+              <button class="btn" title="Next version" on:click={() => gotoVersion(1)} disabled={thread.index >= thread.files.length - 1 || isGenerating}>▶</button>
+              <button class="btn primary" on:click={() => (isIterateOpen = true)} disabled={isGenerating}>Iterate</button>
+              <button class="btn" on:click={() => (isIterateOpen = true)} disabled={!selectedExcerpt || isGenerating}>Iterate Selection</button>
+              <button class="btn danger" on:click={() => deleteNarrative(selectedNarrative!.filename)} disabled={isGenerating}>Delete</button>
+              {#if isGenerating}
+                <span class="loading">Generating…</span>
+              {/if}
             </div>
           </div>
           {#if selectedExcerpt}
@@ -266,8 +270,11 @@
   parentFilename={selectedNarrative?.filename || ''}
   selectedExcerpt={selectedExcerpt}
   on:close={() => (isIterateOpen = false)}
+  on:start={() => { isGenerating = true; }}
+  on:finish={() => { isGenerating = false; }}
   on:done={async (e) => {
     isIterateOpen = false;
+    isGenerating = false;
     await getNarratives();
     const fname = e.detail?.filename;
     if (fname) await getNarrativeContent(fname);
@@ -361,6 +368,7 @@
   .content-header { position: sticky; top: 0; background: #fff; padding-bottom: .5rem; margin-bottom: .5rem; z-index: 1; }
   .content-header .filename { display: inline-block; margin: 0 .75rem .25rem 0; }
   .toolbar { display: inline-flex; gap: .5rem; flex-wrap: wrap; vertical-align: middle; }
+  .loading { color:#374151; font-style: italic; }
   /* removed unused .actions */
   .btn { border: none; padding: .4rem .7rem; border-radius: 6px; cursor: pointer; background: #e5e7eb; }
   .btn.primary { background: #3B82F6; color: white; }

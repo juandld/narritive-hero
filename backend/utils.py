@@ -7,6 +7,9 @@ import contextlib
 from datetime import datetime
 from services import transcribe_and_save
 import usage_log as usage
+import note_store as _ns
+import providers
+from langchain_core.messages import HumanMessage
 import config
 
 # Centralized paths; keep module vars for monkeypatching in tests
@@ -53,6 +56,12 @@ async def on_startup():
         # If JSON missing, schedule transcription/title generation
         if json_filename not in json_files:
             wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
+            # Create a minimal JSON immediately so a title is present in the UI
+            try:
+                payload = _ns.build_note_payload(wav_file, base, "")
+                _ns.save_note_json(base, payload)
+            except Exception:
+                pass
             tasks.append(transcribe_and_save(wav_path))
         else:
             # JSON exists. Re-transcribe only if it previously failed.
@@ -72,7 +81,6 @@ async def on_startup():
 
     # Ensure metadata fields (language/topics/tags/folder/length/date) exist on all JSONs
     try:
-        import note_store as _ns
         count_updated = 0
         for fn in list(os.listdir(TRANSCRIPTS_DIR)):
             if not fn.endswith('.json'):
@@ -93,6 +101,64 @@ async def on_startup():
             print(f"Backfilled metadata on {count_updated} existing notes.")
     except Exception as e:
         print(f"Metadata backfill skipped: {e}")
+
+    # Backfill missing titles where possible
+    try:
+        async def _gen_title_for(base: str, data: dict):
+            try:
+                text = (data.get('transcription') or '').strip()
+                if not text:
+                    # no transcription; set a sensible default
+                    data['title'] = data.get('title') or base
+                else:
+                    msg = HumanMessage(content=[{"type": "text", "text": (
+                        "Return exactly one short title (5–8 words) for the transcription below. "
+                        "Use the same language as the transcription. Do not include quotes, bullets, markdown, or any extra text. "
+                        "Output only the title on a single line.\n\n" + text
+                    )}])
+                    try:
+                        resp, _ = await asyncio.to_thread(providers.invoke_google, [msg])
+                        title = providers.normalize_title_output(getattr(resp, 'content', ''))
+                    except Exception:
+                        try:
+                            title = providers.title_with_openai(text)
+                        except Exception:
+                            title = base
+                    data['title'] = title or base
+                # persist update
+                _ns.save_note_json(base, data)
+                try:
+                    usage.log_usage(event="title_backfill", provider="auto", model="n/a", key_label="n/a", status="success")
+                except Exception:
+                    pass
+            except Exception:
+                # ignore failures
+                return
+
+        missing = []
+        for fn in list(os.listdir(TRANSCRIPTS_DIR)):
+            if not fn.endswith('.json'):
+                continue
+            base = os.path.splitext(fn)[0]
+            jp = os.path.join(TRANSCRIPTS_DIR, fn)
+            try:
+                with open(jp, 'r') as f:
+                    data = json.load(f)
+                title = (data.get('title') or '').strip()
+                # Treat placeholder titles as missing and re-generate
+                if (not title) or title.lower() in { 'untitled', 'title generation failed.' }:
+                    missing.append((base, data))
+            except Exception:
+                continue
+        if missing:
+            print(f"Backfilling missing titles for {len(missing)} notes...")
+            sem = asyncio.Semaphore(3)
+            async def _run(item):
+                async with sem:
+                    await _gen_title_for(item[0], item[1])
+            await asyncio.gather(*[_run(it) for it in missing])
+    except Exception as e:
+        print(f"Title backfill skipped: {e}")
 
     if tasks:
         print(f"Found {len(tasks)} notes to transcribe/title.")

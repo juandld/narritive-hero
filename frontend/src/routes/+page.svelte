@@ -3,7 +3,6 @@
   import Toast from '../lib/components/Toast.svelte';
   import PlacePrompt from '../lib/components/PlacePrompt.svelte';
   import NotesList from '../lib/components/NotesList.svelte';
-  import NarrativesDrawer from '../lib/components/NarrativesDrawer.svelte';
   import NarrativeGenerateModal from '../lib/components/NarrativeGenerateModal.svelte';
   import FormatsManager from '../lib/components/FormatsManager.svelte';
   import TextNoteModal from '../lib/components/TextNoteModal.svelte';
@@ -29,8 +28,7 @@
   let multiUploadIndex = $state(0);
   const multiUploadPercent = $derived(multiUploadTotal ? Math.floor((multiUploadIndex / multiUploadTotal) * 100) : 0);
 
-  let isNarrativesDrawerOpen = $state(false);
-  let initialNarrativeSelect = $state<string | null>(null);
+  // Drawer removed; navigate to narratives page instead
   let isNarrativeModalOpen = $state(false);
   let isGeneratingNarrative = $state(false);
   let isFormatsOpen = $state(false);
@@ -49,6 +47,7 @@
   import FiltersBar from '../lib/components/FiltersBar.svelte';
   import type { Filters } from '$lib/stores/filters';
   import BulkActions from '../lib/components/BulkActions.svelte';
+  import { goto } from '$app/navigation';
   import { filters as filtersStore } from '$lib/stores/filters';
   import { computedDurations as durationsStore } from '$lib/stores/durations';
   import { applyFilters } from '$lib/filters';
@@ -91,11 +90,10 @@
       isGeneratingNarrative = false;
       isNarrativeModalOpen = false;
       if (filename) {
-        initialNarrativeSelect = filename;
-        isNarrativesDrawerOpen = true;
+        // Navigate to narratives route and open the new narrative
+        try { await goto(`/narratives?open=${encodeURIComponent(filename)}`); } catch {}
         toastMessage = 'Narrative created';
-        showToast = true;
-        setTimeout(() => (showToast = false), 2500);
+        showToast = true; setTimeout(() => (showToast = false), 2500);
       }
     } catch (err) {
       console.error('generate narrative failed', err);
@@ -118,7 +116,7 @@
     bind:layout
     on:startRecording={() => uiAppActions.startRecording()}
     on:stopRecording={() => uiAppActions.stopRecording()}
-    on:openNarratives={() => (isNarrativesDrawerOpen = true)}
+    on:openNarratives={() => { try { goto('/narratives'); } catch { isNarrativesDrawerOpen = true; } }}
     on:openFormats={() => (isFormatsOpen = true)}
     on:openTextNote={() => (isTextNoteOpen = true)}
     on:uploadFiles={(e) => uploadsHandleFiles((e.detail as File[]) || [])}
@@ -190,7 +188,6 @@
   />
 </main>
 
-<NarrativesDrawer isOpen={isNarrativesDrawerOpen} initialSelect={initialNarrativeSelect} onClose={() => (isNarrativesDrawerOpen = false)} />
 <FormatsManager open={isFormatsOpen} on:close={() => (isFormatsOpen = false)} />
 <TextNoteModal
   open={isTextNoteOpen}

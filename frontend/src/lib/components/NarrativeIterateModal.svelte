@@ -6,6 +6,7 @@
   export let currentContent: string = '';
   export let selectedExcerpt: string = '';
   export let parentFilename: string = '';
+  export let selectedNarratives: string[] = [];
 
   const dispatch = createEventDispatcher();
 
@@ -14,7 +15,7 @@
   let loadingNotes = false;
 
   // Mode selection
-  type Mode = 'note' | 'text' | 'record';
+  type Mode = 'note' | 'text' | 'record' | 'narratives';
   let mode: Mode = 'note';
 
   // Existing note selection
@@ -23,6 +24,7 @@
   // Extra text
   let extraText: string = '';
   let errorMessage: string = '';
+  let submitting = false;
 
   // Recording state
   let isRecording = false;
@@ -153,11 +155,13 @@
   $: canGenerate = (
     (mode === 'note' && (!!selectedNote || !!currentContent.trim())) ||
     (mode === 'text' && !!extraText.trim()) ||
-    (mode === 'record' && !!newNoteFilename)
+    (mode === 'record' && !!newNoteFilename) ||
+    (mode === 'narratives' && (selectedNarratives?.length || 0) > 0)
   );
+  $: if (open && (selectedNarratives?.length || 0) > 0) { mode = 'narratives'; }
 
   async function submit() {
-    if (uploading || polling) return;
+    if (uploading || polling || submitting) return;
     errorMessage = '';
     let items: { filename: string }[] = [];
     let extra = `Previous Narrative:\n\n${currentContent.trim()}`;
@@ -166,6 +170,9 @@
         items = [{ filename: selectedNote }];
       }
       // If no selected note, proceed with just the previous narrative in extra
+    } else if (mode === 'narratives') {
+      if (!selectedNarratives || selectedNarratives.length === 0) return;
+      items = selectedNarratives.map((fn) => ({ filename: fn }));
     } else if (mode === 'text') {
       if (!extraText.trim()) return;
       extra += `\n\nNew Input:\n\n${extraText.trim()}`;
@@ -193,6 +200,8 @@
     if (format_ids && format_ids.length) body.format_ids = format_ids;
     if (system) body.system = system;
     try {
+      submitting = true;
+      dispatch('start');
       const res = await fetch(`${BACKEND_URL}/api/narratives/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,9 +213,14 @@
       } else {
         const t = await res.text();
         errorMessage = `Failed to generate iteration (${res.status}). ${t || ''}`.trim();
+        dispatch('error', { message: errorMessage });
       }
     } catch (e: any) {
       errorMessage = e?.message || 'Network error generating iteration';
+      dispatch('error', { message: errorMessage });
+    } finally {
+      submitting = false;
+      dispatch('finish');
     }
   }
 </script>
@@ -217,7 +231,7 @@
     <div class="modal-header">
       <h3>Iterate Narrative</h3>
     </div>
-    <div class="modal-body">
+  <div class="modal-body">
       <div class="label">Formats (optional)</div>
       <div class="formats-list">
         {#each formats as f}
@@ -309,12 +323,12 @@
       {/if}
     </div>
     <div class="modal-footer">
-      <button class="btn" on:click={close} disabled={uploading || polling || isRecording}>Cancel</button>
+      <button class="btn" on:click={close} disabled={uploading || polling || isRecording || submitting}>Cancel</button>
       <button
         class="btn primary"
         on:click={submit}
-        disabled={!canGenerate || uploading || polling}
-      >Generate Iteration</button>
+        disabled={!canGenerate || uploading || polling || submitting}
+      >{submitting ? 'Generating…' : 'Generate Iteration'}</button>
     </div>
     {#if errorMessage}
       <div class="error inline">{errorMessage}</div>
@@ -350,3 +364,9 @@
   .fmt { display:flex; align-items:center; gap:.4rem; font-size:.95rem; }
   .empty { color:#6b7280; font-size:.9rem; }
 </style>
+      {#if (selectedNarratives?.length || 0) > 0}
+        <label class="mode">
+          <input type="radio" name="mode" value="narratives" checked={mode === 'narratives'} on:change={() => (mode = 'narratives')} />
+          Use selected narratives ({selectedNarratives.length})
+        </label>
+      {/if}
