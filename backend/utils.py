@@ -70,6 +70,30 @@ async def on_startup():
                 wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
                 tasks.append(transcribe_and_save(wav_path))
 
+    # Ensure metadata fields (language/topics/tags/folder/length/date) exist on all JSONs
+    try:
+        import note_store as _ns
+        count_updated = 0
+        for fn in list(os.listdir(TRANSCRIPTS_DIR)):
+            if not fn.endswith('.json'):
+                continue
+            base = os.path.splitext(fn)[0]
+            jp = os.path.join(TRANSCRIPTS_DIR, fn)
+            try:
+                with open(jp, 'r') as f:
+                    data = json.load(f)
+                before = json.dumps(data, sort_keys=True)
+                data2 = _ns.ensure_metadata_in_json(base, data)
+                after = json.dumps(data2, sort_keys=True)
+                if before != after:
+                    count_updated += 1
+            except Exception:
+                continue
+        if count_updated:
+            print(f"Backfilled metadata on {count_updated} existing notes.")
+    except Exception as e:
+        print(f"Metadata backfill skipped: {e}")
+
     if tasks:
         print(f"Found {len(tasks)} notes to transcribe/title.")
         # Run in background so app startup is not blocked

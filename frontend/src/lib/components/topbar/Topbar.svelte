@@ -22,6 +22,7 @@
     <div class="actions" style="margin-left:auto">
       <input id="toolbar-upload" type="file" accept="audio/*" multiple style="display:none" on:change={triggerUpload} />
       <button class="btn" on:click={() => (document.getElementById('toolbar-upload') as HTMLInputElement)?.click()}>Upload</button>
+      <button class="btn" on:click={() => dispatch('openTextNote')}>New Text Note</button>
       <button class="btn" on:click={() => dispatch('openNarratives')}>Narratives</button>
       <button class="btn" on:click={() => dispatch('openFormats')}>Formats</button>
     </div>
@@ -61,4 +62,3 @@
   .view .seg button { border:none; padding:.35rem .6rem; background:#fff; cursor:pointer; }
   .view .seg button.active { background:#eef2ff; color:#4338ca; font-weight:600; }
 </style>
-

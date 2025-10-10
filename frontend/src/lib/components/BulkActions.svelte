@@ -28,7 +28,7 @@
     <div class="seg move" data-hasmenu={showMenu}>
       <button class="pill" on:click={toggleMoveMenu} aria-haspopup="menu" aria-expanded={showMenu} title="Move selected">Move…</button>
       {#if showMenu}
-        <div class="menu-backdrop" on:click={() => (showMenu = false)}></div>
+        <div class="menu-backdrop" role="button" aria-label="Close move menu" tabindex="0" on:click={() => (showMenu = false)} on:keydown={(e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); showMenu=false; } }}></div>
         <div class="menu" role="menu">
           <button role="menuitem" class="menu-item" on:click={() => chooseMoveTarget('')}>Unfiled</button>
           {#each folders as f}
@@ -75,5 +75,5 @@
   .btn { border:1px solid transparent; padding:.55rem .9rem; border-radius: 10px; cursor:pointer; color:#fff; }
   .btn.create { background-color: #28a745; }
   .btn.delete { background-color: #db4437; }
-  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  /* .sr-only removed as unused */
 </style>

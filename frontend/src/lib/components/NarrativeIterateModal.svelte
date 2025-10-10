@@ -22,6 +22,7 @@
 
   // Extra text
   let extraText: string = '';
+  let errorMessage: string = '';
 
   // Recording state
   let isRecording = false;
@@ -75,7 +76,8 @@
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
       mediaRecorder.onstop = async () => {
-        const blob = new Blob(audioChunks, { type: 'audio/wav' });
+        const mime = (mediaRecorder && (mediaRecorder as any).mimeType) || (audioChunks[0] && (audioChunks[0] as any).type) || 'audio/webm';
+        const blob = new Blob(audioChunks, { type: mime });
         audioChunks = [];
         await uploadRecording(blob);
       };
@@ -100,7 +102,10 @@
     newNoteFilename = null;
     try {
       const fd = new FormData();
-      fd.append('file', blob, 'iterate.wav');
+      // Choose extension based on mime
+      const mt = (blob as any).type || 'audio/webm';
+      const ext = mt.includes('webm') ? 'webm' : mt.includes('ogg') ? 'ogg' : mt.includes('mp3') ? 'mp3' : mt.includes('mp4') ? 'm4a' : 'wav';
+      fd.append('file', blob, `iterate.${ext}`);
       const res = await fetch(`${BACKEND_URL}/api/notes`, { method: 'POST', body: fd });
       if (!res.ok) throw new Error('Upload failed');
       const data = await res.json();
@@ -145,13 +150,22 @@
     }
   }
 
+  $: canGenerate = (
+    (mode === 'note' && (!!selectedNote || !!currentContent.trim())) ||
+    (mode === 'text' && !!extraText.trim()) ||
+    (mode === 'record' && !!newNoteFilename)
+  );
+
   async function submit() {
     if (uploading || polling) return;
+    errorMessage = '';
     let items: { filename: string }[] = [];
     let extra = `Previous Narrative:\n\n${currentContent.trim()}`;
     if (mode === 'note') {
-      if (!selectedNote) return;
-      items = [{ filename: selectedNote }];
+      if (selectedNote) {
+        items = [{ filename: selectedNote }];
+      }
+      // If no selected note, proceed with just the previous narrative in extra
     } else if (mode === 'text') {
       if (!extraText.trim()) return;
       extra += `\n\nNew Input:\n\n${extraText.trim()}`;
@@ -178,16 +192,21 @@
     const body: any = { items, extra_text: extra, provider: 'auto', parent: parentFilename };
     if (format_ids && format_ids.length) body.format_ids = format_ids;
     if (system) body.system = system;
-    const res = await fetch(`${BACKEND_URL}/api/narratives/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      dispatch('done', { filename: data.filename });
-    } else {
-      alert('Failed to generate iteration');
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/narratives/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        dispatch('done', { filename: data.filename });
+      } else {
+        const t = await res.text();
+        errorMessage = `Failed to generate iteration (${res.status}). ${t || ''}`.trim();
+      }
+    } catch (e: any) {
+      errorMessage = e?.message || 'Network error generating iteration';
     }
   }
 </script>
@@ -199,7 +218,7 @@
       <h3>Iterate Narrative</h3>
     </div>
     <div class="modal-body">
-      <label>Formats (optional)</label>
+      <div class="label">Formats (optional)</div>
       <div class="formats-list">
         {#each formats as f}
           <label class="fmt"><input type="checkbox" checked={format_ids.includes(f.id)} on:change={(e) => {
@@ -254,8 +273,8 @@
             <div>Loading notes…</div>
           {:else}
             <label for="note">Select a note</label>
-            <select id="note" value={selectedNote} on:change={(e) => (selectedNote = (e.target as HTMLSelectElement).value)}>
-              <option value="" disabled selected>Select…</option>
+            <select id="note" bind:value={selectedNote}>
+              <option value="" disabled>Select…</option>
               {#each notes as n}
                 <option value={n.filename}>{n.title || n.filename}</option>
               {/each}
@@ -265,7 +284,7 @@
       {:else if mode === 'text'}
         <div class="section">
           <label for="extra">Extra text</label>
-          <textarea id="extra" value={extraText} on:input={(e) => (extraText = (e.target as HTMLTextAreaElement).value)} placeholder="Add more context to guide the iteration"></textarea>
+          <textarea id="extra" bind:value={extraText} placeholder="Add more context to guide the iteration"></textarea>
         </div>
       {:else}
         <div class="section">
@@ -294,22 +313,26 @@
       <button
         class="btn primary"
         on:click={submit}
-        disabled={uploading || polling || (mode==='note' && !selectedNote) || (mode==='text' && !extraText.trim()) || (mode==='record' && !newNoteFilename)}
+        disabled={!canGenerate || uploading || polling}
       >Generate Iteration</button>
     </div>
+    {#if errorMessage}
+      <div class="error inline">{errorMessage}</div>
+    {/if}
   </div>
 {/if}
 
 <style>
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 1100; }
   .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-           background: #fff; padding: 1rem; border-radius: 8px; width: min(680px, 92vw); z-index: 61; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+           background: #fff; padding: 1rem; border-radius: 8px; width: min(680px, 92vw); z-index: 1101; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
   .modal-header { margin-bottom: .5rem; }
   .modal-body { display: flex; flex-direction: column; gap: .75rem; }
   .modes { display: flex; gap: 1rem; }
   .mode { display: flex; align-items: center; gap: .4rem; }
   .section { display: flex; flex-direction: column; gap: .5rem; }
   label { font-size: .9rem; color: #374151; }
+  .label { font-size: .9rem; color: #374151; }
   select, textarea { padding: .5rem; border: 1px solid #e5e7eb; border-radius: 6px; }
   textarea { min-height: 120px; resize: vertical; }
   .modal-footer { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .5rem; }
@@ -319,6 +342,7 @@
   .btn[disabled] { opacity: .6; cursor: not-allowed; }
   .status { color: #374151; font-size: .9rem; }
   .error { color: #b91c1c; font-size: .9rem; }
+  .error.inline { margin-top: .5rem; }
   .ok { color: #065f46; font-size: .9rem; }
   .hint { color: #6b7280; margin: 0; }
   h3 { margin: 0; }

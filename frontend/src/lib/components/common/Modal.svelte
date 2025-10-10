@@ -14,7 +14,7 @@
 </script>
 
 {#if open}
-  <div class="modal-overlay" on:click={onOverlayClick}></div>
+  <div class="modal-overlay" role="button" tabindex="0" aria-label="Close dialog" on:click={onOverlayClick} on:keydown={(e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); onOverlayClick(); } }}></div>
   <div class="modal" style={`width:${width}`} role="dialog" aria-modal="true" on:keydown={onKey} tabindex="-1" bind:this={modalEl}>
     {#if title}
       <div class="modal-header">
@@ -39,4 +39,3 @@
   .x { background:none; border:none; font-size:1.2rem; cursor:pointer; }
   .modal-content { overflow:auto; min-height:0; }
 </style>
-

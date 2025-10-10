@@ -27,6 +27,7 @@ import asyncio
 from langchain_core.messages import HumanMessage
 import providers
 import config
+import note_store as _note_store
 
 app = FastAPI()
 
@@ -109,18 +110,98 @@ async def retry_note(background_tasks: BackgroundTasks, filename: str):
 async def delete_note(filename: str):
     """API endpoint to delete a note."""
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
+    base_filename = os.path.splitext(filename)[0]
+    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
+    legacy_txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
+    deleted_any = False
+    # Delete audio file if present
     if os.path.exists(file_path):
-        os.remove(file_path)
-        # Delete associated JSON (and legacy txt)
-        base_filename = os.path.splitext(filename)[0]
-        json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
-        legacy_txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
-        if os.path.exists(json_path):
+        try:
+            os.remove(file_path)
+            deleted_any = True
+        except Exception:
+            pass
+    # Always attempt to delete associated JSON (and legacy txt) even if audio missing
+    if os.path.exists(json_path):
+        try:
             os.remove(json_path)
-        if os.path.exists(legacy_txt_path):
+            deleted_any = True
+        except Exception:
+            pass
+    if os.path.exists(legacy_txt_path):
+        try:
             os.remove(legacy_txt_path)
-        return Response(status_code=200)
-    return Response(status_code=404)
+            deleted_any = True
+        except Exception:
+            pass
+    return Response(status_code=200 if deleted_any else 404)
+
+@app.post("/api/notes/text")
+async def create_text_note(request: Request):
+    """Create a note directly from provided transcription text (no audio).
+
+    Body JSON: { transcription: string, title?: string, date?: string, folder?: string, tags?: [{label,color?}] }
+    Returns: { filename }
+    """
+    try:
+        body = await request.json()
+        transcription = str((body or {}).get("transcription") or "").strip()
+        title = str((body or {}).get("title") or "").strip()
+        date_override = str((body or {}).get("date") or "").strip()
+        folder = str((body or {}).get("folder") or "").strip()
+        tags = (body or {}).get("tags") or []
+        if not transcription:
+            return Response(status_code=400)
+
+        # Generate a unique id and pseudo filename (non-audio)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        nid = f"text-{stamp}-{uuid.uuid4().hex[:6]}"
+        pseudo_filename = f"{nid}.txt"
+
+        # Auto-generate title if missing via Gemini with OpenAI fallback
+        if not title:
+            try:
+                title_message = HumanMessage(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": (
+                                "Return exactly one short title (5–8 words) for the transcription below. "
+                                "Use the same language as the transcription. Do not include quotes, bullets, markdown, or any extra text. "
+                                "Output only the title on a single line.\n\n" + transcription
+                            ),
+                        },
+                    ]
+                )
+                title_response, _ = await asyncio.to_thread(
+                    providers.invoke_google, [title_message]
+                )
+                title = providers.normalize_title_output(getattr(title_response, "content", ""))
+            except Exception:
+                try:
+                    title = providers.title_with_openai(transcription)
+                except Exception:
+                    title = "Untitled"
+
+        # Build payload similar to build_note_payload but without audio metadata
+        data = {
+            "filename": pseudo_filename,
+            "title": title or "Untitled",
+            "transcription": transcription,
+            "date": date_override or datetime.now().strftime('%Y-%m-%d'),
+            "length_seconds": None,
+            "topics": _note_store.infer_topics(transcription, title or None),
+            "language": _note_store.infer_language(transcription, title or None),
+            "folder": folder,
+            "tags": [ {"label": str((t or {}).get("label") or "").strip(), "color": (t or {}).get("color") } for t in tags if isinstance(t, dict) and (t.get("label") or "").strip() ],
+        }
+        # Persist JSON
+        os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+        with open(os.path.join(TRANSCRIPTS_DIR, f"{nid}.json"), 'w') as jf:
+            json.dump(data, jf, ensure_ascii=False)
+        return {"filename": pseudo_filename}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.patch("/api/notes/{filename}/tags")
 async def update_tags(filename: str, payload: TagsUpdate):

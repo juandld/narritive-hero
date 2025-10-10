@@ -43,6 +43,62 @@ STOPWORDS = set(
     "the a an and or but for with without on in at to from of by this that those these is are was were be been being i you he she it we they them me my your our their as not just into over under again more most some any few many much very can could should would".split()
 )
 
+def infer_language(text: str | None, title: str | None = None) -> str:
+    """Very lightweight language inference.
+
+    - Detects scripts (CJK, Cyrillic, Arabic, Hebrew, Devanagari) by Unicode ranges
+    - For Latin languages, uses small stopword probes across a handful of languages
+    Returns a BCP-47-ish short code (e.g., 'en', 'es') or 'und' if unknown.
+    """
+    src = (text or '').strip() or (title or '').strip()
+    if not src:
+        return 'und'
+    # Script detection by ranges
+    for ch in src:
+        o = ord(ch)
+        if 0x3040 <= o <= 0x30FF:  # Hiragana/Katakana
+            return 'ja'
+        if 0x4E00 <= o <= 0x9FFF:  # CJK Unified Ideographs (common for zh)
+            return 'zh'
+        if 0xAC00 <= o <= 0xD7AF:  # Hangul
+            return 'ko'
+        if 0x0400 <= o <= 0x04FF:  # Cyrillic
+            return 'ru'
+        if 0x0590 <= o <= 0x05FF:  # Hebrew
+            return 'he'
+        if 0x0600 <= o <= 0x06FF:  # Arabic
+            return 'ar'
+        if 0x0900 <= o <= 0x097F:  # Devanagari
+            return 'hi'
+
+    # Latin-based heuristic using tiny stopword sets
+    import re
+    tokens = [t for t in re.findall(r"[A-Za-z]{2,}", src.lower()) if t]
+    if not tokens:
+        return 'und'
+    SW = {
+        'en': {'the','and','to','of','in','that','for','with','on','is','it'},
+        'es': {'el','la','de','y','en','que','para','con','los','las','es'},
+        'fr': {'le','la','et','de','des','en','que','pour','avec','les','est'},
+        'de': {'der','die','und','in','den','von','zu','mit','das','ist'},
+        'it': {'il','la','e','di','che','per','con','le','gli','è'},
+        'pt': {'o','a','e','de','que','para','com','os','as','é'},
+        'nl': {'de','het','en','van','in','met','voor','op','is'},
+        'sv': {'och','att','det','som','i','på','för','är'},
+        'tr': {'ve','bir','bu','için','ile','de','da','şu','olan'},
+        'pl': {'i','w','na','że','z','do','jest','się','po'},
+        'ro': {'și','în','de','la','cu','este','pentru','pe'},
+        'cs': {'a','že','se','v','na','s','pro','je'},
+    }
+    scores: dict[str,int] = {k:0 for k in SW.keys()}
+    for t in tokens:
+        for lang, sw in SW.items():
+            if t in sw:
+                scores[lang] += 1
+    # pick max
+    best = max(scores.items(), key=lambda kv: kv[1] if kv[1] is not None else 0)
+    return best[0] if best[1] > 0 else 'und'
+
 
 def infer_topics(text: str | None, title: str | None) -> list[str]:
     source = (title or "").strip() or (text or "").strip()
@@ -69,6 +125,7 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
     date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d') if mtime else None
     length_sec = audio_length_seconds(audio_path) if mtime else None
     topics = infer_topics(transcription, title)
+    language = infer_language(transcription, title)
     return {
         "filename": audio_filename,
         "title": title,
@@ -76,6 +133,7 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
         "date": date_str,
         "length_seconds": length_sec,
         "topics": topics,
+        "language": language,
         "folder": "",
         "tags": [],
     }
@@ -119,6 +177,7 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
     """Ensure date/length/topics/tags fields exist and persist if updated."""
     audio_path = _find_audio_path(base_filename, data)
     updated = False
+    jp = note_json_path(base_filename)
     if audio_path and os.path.exists(audio_path):
         if not data.get("date"):
             mtime = os.path.getmtime(audio_path)
@@ -127,8 +186,20 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
         if data.get("length_seconds") is None:
             data["length_seconds"] = audio_length_seconds(audio_path)
             updated = True
+    # If still no date and JSON exists, use JSON file mtime as a fallback (e.g., text-only notes)
+    if not data.get("date") and os.path.exists(jp):
+        try:
+            mtime = os.path.getmtime(jp)
+            data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+            updated = True
+        except Exception:
+            pass
     if not isinstance(data.get("topics"), list):
         data["topics"] = infer_topics(data.get("transcription"), data.get("title"))
+        updated = True
+    # Ensure language present
+    if not isinstance(data.get("language"), str) or not data.get("language"):
+        data["language"] = infer_language(data.get("transcription"), data.get("title"))
         updated = True
     if not isinstance(data.get("tags"), list):
         data["tags"] = []

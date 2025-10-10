@@ -6,6 +6,7 @@
   import NarrativesDrawer from '../lib/components/NarrativesDrawer.svelte';
   import NarrativeGenerateModal from '../lib/components/NarrativeGenerateModal.svelte';
   import FormatsManager from '../lib/components/FormatsManager.svelte';
+  import TextNoteModal from '../lib/components/TextNoteModal.svelte';
   import Topbar from '$lib/components/topbar/Topbar.svelte';
   import { appActions } from '$lib/services/appActions';
   // Types and filtering handled via stores/derived
@@ -16,7 +17,8 @@
 
   import { isRecording as isRecordingStore, includeDate as includeDateStore, includePlace as includePlaceStore, uiAppActions, detectedPlace as detectedPlaceStore, showPlacePrompt as showPlacePromptStore } from '$lib/stores/uiApp';
   // Using stores/derived for notes, folders, filteredNotes, selection, folder
-  let expandedNotes: Set<string> = new Set();
+  // Expanded notes state comes from a centralized UI store
+  import { expandedNotes as expandedNotesStore } from '$lib/stores/ui';
   let toastMessage = $state('');
   let showToast = $state(false);
   let isUploading = $state(false);
@@ -32,6 +34,7 @@
   let isNarrativeModalOpen = $state(false);
   let isGeneratingNarrative = $state(false);
   let isFormatsOpen = $state(false);
+  let isTextNoteOpen = $state(false);
   // Delete folder confirmation
   let dfOpen = $state(false); let dfName = $state(''); let dfCount = $state(0);
 
@@ -47,8 +50,12 @@
   import type { Filters } from '$lib/stores/filters';
   import BulkActions from '../lib/components/BulkActions.svelte';
   import { filters as filtersStore } from '$lib/stores/filters';
-  import { filteredNotes as filteredNotesStore } from '$lib/stores/derived';
-  let filters: Filters = { dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '' };
+  import { computedDurations as durationsStore } from '$lib/stores/durations';
+  import { applyFilters } from '$lib/filters';
+  let filters: Filters = $state({ dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '', sortKey: 'date', sortDir: 'desc' });
+  // Keep global filters store in sync (optional)
+  $effect(() => { try { filtersStore.set(filters); } catch {} });
+  const filteredNotes = $derived(applyFilters($notesStore as any, filters as any, $selectedFolderStore as string, $durationsStore as any));
   let layout = $state<'list' | 'compact' | 'grid3'>('list');
   // Client-side duration cache (store holds the map)
   // durations are computed and stored via pageActions.refreshAll()
@@ -71,6 +78,7 @@
 
 
   import { refreshAll, moveToFolder as moveToFolderAction } from '$lib/services/pageActions';
+  import { api } from '$lib/api';
   onMount(() => { refreshAll(); });
 
   import { deleteOne as deleteOneAction, deleteMany as deleteManyAction } from '$lib/services/pageActions';
@@ -112,6 +120,7 @@
     on:stopRecording={() => uiAppActions.stopRecording()}
     on:openNarratives={() => (isNarrativesDrawerOpen = true)}
     on:openFormats={() => (isFormatsOpen = true)}
+    on:openTextNote={() => (isTextNoteOpen = true)}
     on:uploadFiles={(e) => uploadsHandleFiles((e.detail as File[]) || [])}
   />
 
@@ -133,27 +142,29 @@
   {/if}
 
   <FiltersBar
-    {filters}
-    on:change={(e) => { filtersStore.set(e.detail); }}
-    on:selectAll={() => { selectedNotesStore.set(new Set(($filteredNotesStore || []).map((n) => n.filename))); }}
+    bind:filters
+    on:selectAll={() => { selectedNotesStore.set(new Set((filteredNotes || []).map((n) => n.filename))); }}
     on:clearSelection={() => { notesActions.clearSelection(); lastSelectedIndex = null; }}
-    counts={{ total: ($notesStore || []).length, filtered: ($filteredNotesStore || []).length }}
+    counts={{ total: ($notesStore || []).length, filtered: (filteredNotes || []).length }}
   />
+  <div style="margin: .25rem 0 .5rem 0; color:#666; font-size:.9rem;">
+    Sorting: <strong>{filters.sortKey}</strong> <em>{filters.sortDir}</em> — showing {(filteredNotes || []).length} notes
+  </div>
   <!-- legacy filters markup removed -->
 
   
 
   <NotesList
-    notes={$filteredNotesStore}
-    {expandedNotes}
+    notes={filteredNotes}
+    expandedNotes={$expandedNotesStore}
     selectedNotes={$selectedNotesStore}
     {layout}
     folders={$foldersStore}
     showFolders={$selectedFolderStore==='__ALL__' || $selectedFolderStore==='__UNFILED__'}
     selectedFolder={$selectedFolderStore}
     on:toggle={onToggleExpand}
-    on:copy={onCopy}
-    on:delete={(e) => deleteOneAction(e.detail)}
+    on:copy={(e) => { try { onCopy(e); } finally { toastMessage = 'Copied to clipboard'; showToast = true; setTimeout(() => (showToast = false), 1600); } }}
+    on:delete={async (e) => { try { await deleteOneAction(e.detail); toastMessage = 'Deleted note'; showToast = true; setTimeout(() => (showToast = false), 1600); } catch (err) { console.error('Delete failed', err); toastMessage = 'Delete failed'; showToast = true; setTimeout(() => (showToast = false), 2000); } }}
     on:select={onSelectHandler}
     on:moveToFolder={onMoveToFolder}
     on:createFolder={onCreateFolder}
@@ -171,9 +182,9 @@
     selectedCount={$selectedNotesStore.size}
     isDeleting={isDeleting}
     folders={$foldersStore.map(f=>f.name)}
-    on:deleteSelected={async ()=>{ await deleteManyAction(Array.from($selectedNotesStore)); notesActions.clearSelection(); lastSelectedIndex=null; }}
+    on:deleteSelected={async ()=>{ try { isDeleting = true; const count = $selectedNotesStore.size; await deleteManyAction(Array.from($selectedNotesStore)); notesActions.clearSelection(); lastSelectedIndex=null; toastMessage = count === 1 ? 'Deleted 1 note' : `Deleted ${count} notes`; showToast = true; setTimeout(() => (showToast = false), 1600); } catch (err) { console.error('Bulk delete failed', err); toastMessage = 'Bulk delete failed'; showToast = true; setTimeout(() => (showToast = false), 2000); } finally { isDeleting = false; } }}
     on:createNarrative={createNarrative}
-    on:selectAll={() => { selectedNotesStore.set(new Set(($filteredNotesStore||[]).map((n) => n.filename))); }}
+    on:selectAll={() => { selectedNotesStore.set(new Set((filteredNotes||[]).map((n) => n.filename))); }}
     on:clearSelection={() => { notesActions.clearSelection(); lastSelectedIndex = null; }}
     on:bulkMove={async (e) => { const filenames = Array.from($selectedNotesStore); if (!filenames.length) return; await moveToFolderAction(e.detail.folder, filenames); notesActions.clearSelection(); }}
   />
@@ -181,6 +192,24 @@
 
 <NarrativesDrawer isOpen={isNarrativesDrawerOpen} initialSelect={initialNarrativeSelect} onClose={() => (isNarrativesDrawerOpen = false)} />
 <FormatsManager open={isFormatsOpen} on:close={() => (isFormatsOpen = false)} />
+<TextNoteModal
+  open={isTextNoteOpen}
+  on:close={() => (isTextNoteOpen = false)}
+  on:create={async (e) => {
+    try {
+      const { title, transcription, folder } = e.detail as { title?: string; transcription: string; folder?: string };
+      await api.createTextNote({ title, transcription, folder });
+      isTextNoteOpen = false;
+      await refreshAll();
+      toastMessage = 'Text note created';
+      showToast = true; setTimeout(() => (showToast = false), 1600);
+    } catch (err) {
+      console.error('create text note failed', err);
+      toastMessage = 'Failed to create text note';
+      showToast = true; setTimeout(() => (showToast = false), 2000);
+    }
+  }}
+/>
   <NarrativeGenerateModal
     open={isNarrativeModalOpen}
     selected={Array.from($selectedNotesStore)}

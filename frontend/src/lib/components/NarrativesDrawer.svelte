@@ -190,10 +190,15 @@
       if (!renderEl || !renderEl.contains(range.commonAncestorContainer)) return;
       const text = sel.toString().trim();
       selectedExcerpt = text || '';
-    } catch (e) {
-      // ignore
-    }
+    } catch {}
   }
+
+  // Use document-level selectionchange to avoid mouse/keyboard handlers on non-interactive elements
+  onMount(() => {
+    const handler = () => updateSelection();
+    document.addEventListener('selectionchange', handler);
+    return () => { document.removeEventListener('selectionchange', handler); };
+  });
 
   function clearSelection() {
     selectedExcerpt = '';
@@ -244,7 +249,7 @@
               <button class="link" on:click={clearSelection}>Clear</button>
             </div>
           {/if}
-          <div class="narrative-render" bind:this={renderEl} on:mouseup={updateSelection} on:keyup={updateSelection}>
+          <div class="narrative-render" role="region" aria-label="Narrative content" bind:this={renderEl}>
             {@html selectedHtml}
           </div>
         {:else}
@@ -346,17 +351,17 @@
     color: #111;
     line-height: 1.5;
   }
-  .narrative-render h1,
-  .narrative-render h2,
-  .narrative-render h3 { margin: 0.5rem 0; }
-  .narrative-render p { margin: 0.5rem 0; }
-  .narrative-render ul { margin: 0.5rem 1.25rem; padding-left: 1rem; }
-  .narrative-render li { margin: 0.25rem 0; }
+  :global(.narrative-render h1),
+  :global(.narrative-render h2),
+  :global(.narrative-render h3) { margin: 0.5rem 0; }
+  :global(.narrative-render p) { margin: 0.5rem 0; }
+  :global(.narrative-render ul) { margin: 0.5rem 1.25rem; padding-left: 1rem; }
+  :global(.narrative-render li) { margin: 0.25rem 0; }
 
   .content-header { position: sticky; top: 0; background: #fff; padding-bottom: .5rem; margin-bottom: .5rem; z-index: 1; }
   .content-header .filename { display: inline-block; margin: 0 .75rem .25rem 0; }
   .toolbar { display: inline-flex; gap: .5rem; flex-wrap: wrap; vertical-align: middle; }
-  .actions { display: flex; gap: .5rem; margin-top: .75rem; }
+  /* removed unused .actions */
   .btn { border: none; padding: .4rem .7rem; border-radius: 6px; cursor: pointer; background: #e5e7eb; }
   .btn.primary { background: #3B82F6; color: white; }
   .btn.danger { background: #ef4444; color: #fff; }

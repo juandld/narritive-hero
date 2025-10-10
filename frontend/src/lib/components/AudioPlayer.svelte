@@ -105,9 +105,9 @@
   });
 </script>
 
-<div class="ap" on:click|stopPropagation on:mousedown|stopPropagation>
+<div class="ap" role="group">
   <audio class="note-audio" bind:this={audioEl} src={src} preload="metadata"></audio>
-  <button class="ap-btn" aria-label={isPlaying ? 'Pause' : 'Play'} on:click={toggle}>
+  <button class="ap-btn" aria-label={isPlaying ? 'Pause' : 'Play'} on:click|stopPropagation={toggle}>
     {#if isPlaying}
       
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" fill="#111"/><rect x="14" y="4" width="4" height="16" rx="1" fill="#111"/></svg>
@@ -115,7 +115,14 @@
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5v14l11-7-11-7z" fill="#111"/></svg>
     {/if}
   </button>
-  <div class="ap-bar" role="slider" aria-valuemin="0" aria-valuemax={duration} aria-valuenow={current} on:click={onBarClick} on:pointerdown={onBarPointerDown}
+  <div class="ap-bar" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax={duration} aria-valuenow={current} on:click|stopPropagation={onBarClick} on:pointerdown|stopPropagation={onBarPointerDown} on:keydown|stopPropagation={(e)=>{
+      if (!audioEl || !isFinite(duration) || duration<=0) return;
+      const step = Math.max(1, duration * 0.05);
+      if (e.key === 'ArrowLeft') { e.preventDefault(); seekToFraction((current - step)/duration); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); seekToFraction((current + step)/duration); }
+      else if (e.key === 'Home') { e.preventDefault(); seekToFraction(0); }
+      else if (e.key === 'End') { e.preventDefault(); seekToFraction(1); }
+    }}
     style="--pct:{duration>0? (current/duration*100) : 0}%;">
     <div class="ap-track {isPlaying ? 'playing' : (isLoaded ? 'loaded' : '')}"></div>
     <div class="ap-progress {isPlaying ? 'playing' : (isLoaded ? 'loaded' : '')}" style="width: var(--pct);"></div>

@@ -1,4 +1,5 @@
 import os
+import json
 import io
 import asyncio
 from datetime import datetime
@@ -170,25 +171,30 @@ async def transcribe_and_save(wav_path):
 # Removed unused helpers and scenario-related functions to reduce complexity
 
 def get_notes():
-    """Lists all notes with their details, including date, topics, and length."""
-    notes = []
-    if not os.path.exists(VOICE_NOTES_DIR):
-        return notes
+    """Lists all notes with their details, including date, topics, and length.
 
-    # Ensure transcripts dir exists (in case)
+    Combines:
+      - Notes with audio files under VOICE_NOTES_DIR
+      - Text-only notes that exist as JSONs under TRANSCRIPTS_DIR
+    """
+    notes: list[dict] = []
+
+    # Ensure dirs exist
     os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
+    os.makedirs(VOICE_NOTES_DIR, exist_ok=True)
 
     AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
+    # First: audio-backed notes
     wav_files = [f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)]
     wav_files.sort(key=lambda f: os.path.getmtime(os.path.join(VOICE_NOTES_DIR, f)), reverse=True)
+    seen_bases: set[str] = set()
     for filename in wav_files:
         base_filename = os.path.splitext(filename)[0]
+        seen_bases.add(base_filename)
         audio_path = os.path.join(VOICE_NOTES_DIR, filename)
         data, transcription, title = note_store.load_note_json(base_filename)
         if data is None:
-            # JSON not yet created (transcription pending). Return lightweight
-            # metadata without creating placeholder JSON to avoid overwriting
-            # the final payload when it arrives.
+            # JSON not yet created (transcription pending). Return lightweight metadata
             mtime = os.path.getmtime(audio_path)
             date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
             length_sec = note_store.audio_length_seconds(audio_path)
@@ -207,13 +213,45 @@ def get_notes():
             data = note_store.ensure_metadata_in_json(base_filename, data)
 
         notes.append({
-            "filename": filename,
+            "filename": data.get("filename") or filename,
             "transcription": transcription,
             "title": title,
             "date": data.get("date"),
             "length_seconds": data.get("length_seconds"),
             "topics": data.get("topics", []),
+            "language": data.get("language", "und"),
             "folder": data.get("folder", ""),
             "tags": data.get("tags", []),
         })
+
+    # Second: text-only notes (JSONs with no matching audio base)
+    for fn in sorted(os.listdir(config.TRANSCRIPTS_DIR)):
+        if not fn.endswith('.json'):
+            continue
+        base = os.path.splitext(fn)[0]
+        if base in seen_bases:
+            continue  # already accounted for by audio-backed loop
+        try:
+            with open(os.path.join(config.TRANSCRIPTS_DIR, fn), 'r') as f:
+                data = json.load(f)
+            # Ensure JSON has expected metadata (language, topics, etc.)
+            try:
+                data = note_store.ensure_metadata_in_json(base, data)
+            except Exception:
+                pass
+            # Use JSON content directly
+            notes.append({
+                "filename": str(data.get("filename") or base + ".txt"),
+                "transcription": data.get("transcription"),
+                "title": data.get("title") or base,
+                "date": data.get("date"),
+                "length_seconds": data.get("length_seconds"),
+                "topics": data.get("topics", []),
+                "language": data.get("language", "und"),
+                "folder": data.get("folder", ""),
+                "tags": data.get("tags", []),
+            })
+        except Exception:
+            continue
+
     return notes

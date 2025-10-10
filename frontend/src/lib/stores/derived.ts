@@ -9,4 +9,3 @@ export const filteredNotes = derived(
   [notes, filters, selectedFolder, computedDurations],
   ([$notes, $filters, $selectedFolder, $durations]) => applyFilters($notes as any, $filters as any, $selectedFolder as string, $durations as Record<string, number>)
 );
-

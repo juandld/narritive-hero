@@ -40,7 +40,8 @@
   }
 </script>
 
-<li class="card {layout}" class:over={isOver} on:dragover={onDragOver} on:dragleave={onDragLeave} on:drop={onDrop} tabindex="0" role="button" on:click={() => dispatch('open', { name })} on:keydown={(e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); dispatch('open', { name }); } }}>
+<li class="card {layout}" class:over={isOver} on:dragover={onDragOver} on:dragleave={onDragLeave} on:drop={onDrop}>
+  <div class="clickable" role="button" tabindex="0" on:click={() => dispatch('open', { name })} on:keydown={(e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); dispatch('open', { name }); } }}>
   <div class="header">
     <p class="title">{name}</p>
     <div class="right">
@@ -53,6 +54,7 @@
     {#if isOver}
       <div class="overlay">Move {overCount} here</div>
     {/if}
+  </div>
   </div>
 </li>
 
@@ -68,4 +70,5 @@
   .del { background:#fee2e2; border:1px solid #fecaca; color:#991b1b; width:24px; height:24px; border-radius:6px; cursor:pointer; }
   .folder-body { background:#fff; border-left:5px solid #c7d2fe; border-radius:4px; padding:.75rem 1rem; color:#4b5563; }
   .overlay { margin-top:.5rem; display:inline-block; background:#10B981; color:#fff; border-radius:9999px; padding:.15rem .5rem; font-size:.8rem; }
+  .clickable { display:block; }
 </style>

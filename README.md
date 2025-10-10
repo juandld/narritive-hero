@@ -2,6 +2,17 @@
 
 A web app to record voice notes and turn them into organized, searchable narratives. Notes are automatically transcribed and titled with Gemini (via LangChain), stored as lightweight JSON, and can be combined into narratives.
 
+## Quick Start (TL;DR)
+
+- Backend: copy `backend/.env.example` to `backend/.env` and add your keys.
+- Dev mode:
+  - In one terminal: `cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
+  - In another: `cd frontend && npm install && npm run dev`
+  - Open `http://localhost:5173`
+- Docker (all-in-one): `docker compose up --build` then open `http://localhost` (backend at `http://localhost:8000`).
+- Add notes: click Upload (Topbar), drag & drop audio anywhere, use Start Recording, or click New Text Note to paste an existing transcript.
+- Expand/collapse text: click the ▼/▲ toggle within a note card. You can also switch views (List/Compact/Grid) from the Topbar.
+
 ## Features
 
 - Voice capture and uploads: record in-browser or upload `.wav` files
@@ -12,6 +23,16 @@ A web app to record voice notes and turn them into organized, searchable narrati
 - Tags: add your own color-coded tags (with last-used color remembered)
 - Bulk actions: delete selected notes, create narratives from selection
 - Narratives drawer: list, open, and delete generated narratives
+
+## Data & Layout
+
+- Storage (local by default):
+  - `storage/voice_notes/` — uploaded/recorded audio
+  - `storage/transcriptions/` — one JSON per note (metadata + text)
+  - `storage/narratives/` — generated narratives (`.txt`)
+- Frontend dev server: `http://localhost:5173`
+- Backend dev server: `http://localhost:8000`
+- Docker: frontend on `:80`, backend on `:8000`
 
 ## Tech Stack
 
@@ -35,7 +56,7 @@ This is the recommended way to run the project.
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd narrative-hero
+    cd narritive-hero
     ```
 
 2.  **Create a `.env` file (backend):**
@@ -105,7 +126,7 @@ For development, you can run the frontend and backend services separately, or us
     # Option B: run directly with uvicorn
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ```
-    This script will automatically create a virtual environment, install dependencies if needed, and start the backend server at `http://localhost:8000`.
+    The helper script assumes you've already created and activated `venv`; it installs dependencies and starts the backend at `http://localhost:8000`.
 
 #### Frontend
 
@@ -134,10 +155,6 @@ From the repo root you can start both dev servers together:
 ```
 This launches the Svelte dev server and the FastAPI dev server concurrently.
 
-    - Optional: Chrome DevTools notice
-      - Chrome may request `/.well-known/appspecific/com.chrome.devtools.json` to auto-configure project settings.
-      - A minimal file is provided at `frontend/static/.well-known/appspecific/com.chrome.devtools.json` to satisfy this and suppress the notice.
-
 ## Project Structure
 
 - `frontend/` SvelteKit app (components for filters, bulk actions, notes, etc.)
@@ -151,10 +168,25 @@ This launches the Svelte dev server and the FastAPI dev server concurrently.
   - `storage/voice_notes/` source audio (e.g., `.wav`, `.mp3`)
   - `storage/transcriptions/` one JSON per note (see schema below)
   - `storage/narratives/` saved narratives as `.txt`
+  - `storage/formats/` saved generation formats (JSON)
+  - `storage/folders/` folders registry (JSON)
 - `compose.yaml` Docker Compose services
 
 Notes:
 - In Docker, the frontend is served as static files via Nginx and the browser calls the backend at `http://localhost:8000` directly (published from the backend container). No proxy is required.
+
+## Environment Variables
+
+Backend reads from `backend/.env` (copy from `.env.example`). Common keys:
+
+- `GOOGLE_API_KEY`, `GOOGLE_API_KEY_1..3` — Gemini API keys (rotation supported)
+- `GOOGLE_MODEL` — optional model override (normalized, e.g. `gemini 2.5 flash`)
+- `GOOGLE_MODEL_EXACT` — exact Gemini model id (disables normalization)
+- `OPENAI_API_KEY` — optional fallback for Whisper/Chat
+- `OPENAI_TRANSCRIBE_MODEL` — default `whisper-1`
+- `OPENAI_TITLE_MODEL` — default `gpt-4o-mini`
+
+Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (default `http://localhost:8000`).
 
 ## Note JSON Schema
 
@@ -168,11 +200,15 @@ Each audio file `storage/voice_notes/<base>.wav` has `storage/transcriptions/<ba
   "date": "2025-09-23",
   "length_seconds": 42.5,
   "topics": ["standup", "team", "progress"],
+  "language": "en",
+  "folder": "",
   "tags": [{ "label": "work", "color": "#3B82F6" }]
 }
 ```
 
 Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files are ignored.
+
+<!-- duplicate Testing section removed; consolidated below -->
 
 ## Backend Behavior
 
@@ -182,6 +218,7 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
 - Startup backfill (non-blocking)
   - Creates JSON for `.wav` lacking one
   - Does not re-transcribe if JSON exists (delete JSON to force refresh)
+  - Backfills metadata (topics, tags, folder, language) into existing JSONs so sorting/filtering work consistently
 - Usage logging
   - Daily JSONL and weekly JSON in `backend/usage/` (git-ignored)
 
@@ -190,9 +227,11 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
 - Notes
   - GET `/api/notes` → list with metadata (title, transcription, date, length, topics, tags)
   - POST `/api/notes` (multipart: `file`) → save audio; transcribe/title in background
+  - POST `/api/notes/text` (JSON: `{ transcription, title?, folder?, date?, tags? }`) → create a text-only note (no audio). If `title` is omitted, the backend generates one via Gemini with OpenAI fallback.
   - POST `/api/notes/{filename}/retry` → requeue background transcribe/title for an existing note
   - DELETE `/api/notes/{filename}` → delete audio + JSON
   - PATCH `/api/notes/{filename}/tags` → `{ "tags": [{"label":"…","color":"#…"}] }`
+  - PATCH `/api/notes/{filename}/folder` → `{ "folder": "…" }` assign or clear a folder
 - Narratives
   - GET `/api/narratives` → list filenames
   - GET `/api/narratives/{filename}` → `{ content }`
@@ -206,6 +245,11 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
   - GET `/api/formats` → list saved formats `{ id, title, prompt }`
   - POST `/api/formats` → create/update `{ title, prompt, id? }` → `{ id }`
   - DELETE `/api/formats/{id}` → remove a saved format
+
+- Folders
+  - GET `/api/folders` → list `{ name, count }`
+  - POST `/api/folders` → create `{ name }`
+  - DELETE `/api/folders/{name}` → remove folder and delete notes within
 
 - Static
   - `/voice_notes/{filename}` → serves uploaded audio files
@@ -221,6 +265,14 @@ Open API docs: visit `http://localhost:8000/docs`.
 - Config: `frontend/src/lib/config.ts` hosts `BACKEND_URL`
 
 Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container.
+
+## Troubleshooting
+
+- Can’t expand text? Click the ▼ button inside the note card to toggle the full transcription. In Compact view, the same toggle applies per note.
+- Upload works but no text appears: transcription runs in the background; refresh after a moment. If it failed, try “Retry” via `POST /api/notes/{filename}/retry` or re-upload.
+- 429/quota errors: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
+- Ports busy: adjust mappings in `compose.yaml` or run dev servers on different ports.
+- Chrome DevTools “project settings” notice: suppressed by `frontend/static/.well-known/appspecific/com.chrome.devtools.json`.
 
 ## Frontend Unused Code
 
@@ -246,18 +298,7 @@ Notes
 - Location: `/home/raw/projects/langhero` (same stack and dev/deploy flow as this project).
 - Run it the same way (Docker Compose or separate backend/frontend dev). Its frontend root renders the scenario UI and uses its own backend copy of the scenario route.
 
-## Testing
-
-- Lightweight smoke tests exist under `tests/`.
-- To run backend-focused smoke tests locally:
-  - `bash tests/backend/test.sh` (attempts to create a venv and run quick checks)
-  - If running offline or without API keys, tests stub external calls where possible.
-
-## Troubleshooting
-
-- No transcription/title appears: ensure `GOOGLE_API_KEY` is set, or configure `OPENAI_API_KEY` for fallback.
-- Quota/rate limits: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
-- Chrome DevTools “project settings” notice: suppressed by `frontend/static/.well-known/appspecific/com.chrome.devtools.json`.
+<!-- duplicate Testing/Troubleshooting sections removed; content merged into single sections -->
 
 ## Tips
 
@@ -272,6 +313,7 @@ Notes
   - All test files and scripts live under `tests/`.
   - Backend: `tests/backend/tests/…` (pytest tests), `tests/backend/test.sh` (runner), `tests/backend/run_smoke_tests.py` (no-deps smoke).
   - Config and dev deps: `tests/backend/pytest.ini`, `tests/backend/requirements-dev.txt`.
+  - Tests create temp dirs and stub external providers; no real API calls.
 
 - Quick run
   - `bash tests/backend/test.sh` creates/activates a local venv if possible, runs pytest when available, and falls back to smoke tests when offline.

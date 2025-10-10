@@ -95,6 +95,7 @@
 
   const MAX_PREVIEW = 140;
   $: previewText = (note.transcription || '').trim();
+  $: hasAudio = /\.(wav|ogg|webm|m4a|mp3)$/i.test(note.filename || '');
 
   function toggleExpand() {
     dispatch('toggle');
@@ -148,11 +149,19 @@
       document.body.classList.add('dragging-notes');
     }catch{}
   }} on:dragend={(e)=>{ setTimeout(()=>{ dragging = false; document.body.classList.remove('dragging-notes'); }, 0); }}
-  class="card {variant}" class:selected={selected} class:playing={isPlaying} class:loaded={isLoaded}
-  on:mousedown={(e)=>{ if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }} on:click={onCardClick} on:keydown={onCardKey} aria-selected={selected} tabindex="0">
+  class="card {variant}" class:selected={selected} class:playing={isPlaying} class:loaded={isLoaded}>
+  <div class="card-body" role="button" aria-pressed={selected} tabindex="0"
+    on:mousedown={(e)=>{ if (!expanded) { e.preventDefault(); } if (e.shiftKey) { e.preventDefault(); try { const s=window.getSelection(); if (s) s.removeAllRanges(); } catch {} } }}
+    on:click={onCardClick}
+    on:keydown={onCardKey}
+  >
   <div class="header">
     <p class="title">{note.title || note.filename.replace(/\.\w+$/i,'')}</p>
     <div class="tools">
+      <span class="badge type" title="Type">{hasAudio ? 'Audio' : 'Text'}</span>
+      {#if note.language}
+        <span class="badge lang" title="Language">{note.language}</span>
+      {/if}
       <button class="mini" title="Edit tags" aria-label="Edit tags" on:click|stopPropagation={() => (showTagEditor = !showTagEditor)}>
         🏷️
       </button>
@@ -167,13 +176,20 @@
     {/if}
     {#if note.tags && note.tags.length}
       {#each note.tags as t, i}
-        <span class="tag" style="background:{t.color || '#6B7280'};" on:click|stopPropagation={() => beginRename(i)}>
+        <span
+          class="tag"
+          role="button"
+          tabindex="0"
+          style="background:{t.color || '#6B7280'};"
+          on:click|stopPropagation={() => beginRename(i)}
+          on:keydown|stopPropagation={(e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); beginRename(i); } }}
+        >
           {t.label}
           <button aria-label="Remove tag" on:click|stopPropagation={() => removeTag(i)} class="tag-x">×</button>
         </span>
         {#if editingTagIndex === i}
-          <div class="tag-inline-editor" on:click|stopPropagation>
-            <input class="rename" bind:value={editingTagLabel} on:keydown={(e)=>{ if(e.key==='Enter'){ saveTagLabel(i); } }} />
+          <div class="tag-inline-editor">
+            <input class="rename" bind:value={editingTagLabel} on:click|stopPropagation on:keydown={(e)=>{ if(e.key==='Enter'){ saveTagLabel(i); } }} />
             <ColorPalette colors={TAG_COLORS} selected={(t.color||'')} size="small" ariaLabel="Pick tag color" onPick={(v)=>changeTagColor(i, v)} />
             <button class="mini" on:click={() => saveTagLabel(i)}>Save</button>
             <button class="mini" on:click={() => (editingTagIndex = null)}>Cancel</button>
@@ -184,23 +200,25 @@
     <!-- Inline add tag chip -->
     <button class="add-chip" on:click|stopPropagation={() => (showTagEditor = !showTagEditor)} aria-expanded={showTagEditor}>+ Tag</button>
     {#if showTagEditor}
-      <div class="tag-inline-editor" on:click|stopPropagation>
-        <input class="rename" placeholder="New tag" bind:value={newTagLabel} on:keydown={(e)=>{ if(e.key==='Enter'){ addTag(); } }} />
+      <div class="tag-inline-editor">
+        <input class="rename" placeholder="New tag" bind:value={newTagLabel} on:click|stopPropagation on:keydown={(e)=>{ if(e.key==='Enter'){ addTag(); } }} />
         <ColorPalette colors={TAG_COLORS} selected={newTagColor} size="small" ariaLabel="Pick tag color" onPick={(v)=>selectColor(v)} />
         <button class="mini" on:click={addTag}>Add</button>
         <button class="mini" on:click={() => { showTagEditor = false; newTagLabel=''; }}>Cancel</button>
       </div>
     {/if}
   </div>
-  <AudioPlayer
-    src={`${BACKEND_URL}/voice_notes/${note.filename}`}
-    on:play={() => (isPlaying = true)}
-    on:pause={() => (isPlaying = false)}
-    on:ended={() => (isPlaying = false)}
-    on:loaded={() => (isLoaded = true)}
-    on:emptied={() => { isLoaded = false; isPlaying = false; }}
-  />
-  <blockquote class="text" on:mousedown={(e) => { if (!expanded) { e.preventDefault(); } }}>
+  {#if hasAudio}
+    <AudioPlayer
+      src={`${BACKEND_URL}/voice_notes/${note.filename}`}
+      on:play={() => (isPlaying = true)}
+      on:pause={() => (isPlaying = false)}
+      on:ended={() => (isPlaying = false)}
+      on:loaded={() => (isLoaded = true)}
+      on:emptied={() => { isLoaded = false; isPlaying = false; }}
+    />
+  {/if}
+  <blockquote class="text">
     <p class:clamp={variant==='compact' && !expanded} class:selectable={expanded} class:noselect={!expanded}>
       {#if note.transcription}
         {expanded ? note.transcription : (previewText.length > MAX_PREVIEW ? previewText.slice(0, MAX_PREVIEW) + '…' : previewText)}
@@ -209,7 +227,7 @@
       {/if}
     </p>
     {#if previewText && previewText.length > 0}
-      <button class="toggle" on:click|stopPropagation={toggleExpand}>
+      <button class="toggle" on:mousedown|stopPropagation on:click|stopPropagation={toggleExpand}>
         {expanded ? '\u25B2' : '\u25BC'}
       </button>
     {/if}
@@ -217,6 +235,7 @@
   <div class="actions">
     <button class="primary" on:click|stopPropagation={copyToClipboard}>Copy TS</button>
     <button class="danger" on:click|stopPropagation={deleteNote}>Delete</button>
+  </div>
   </div>
 </li>
 
@@ -228,18 +247,17 @@
   .card.compact .title { font-size: .95rem; }
   .meta { color:#666; }
   .tools { display:flex; align-items:center; gap:.35rem; }
+  .badge { font-size:.7rem; background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:9999px; }
+  .badge.lang { background:#e8f0fe; color:#1a73e8; }
   .mini { border:1px solid #e5e7eb; background:#fff; color:#374151; border-radius:6px; padding:.15rem .4rem; cursor:pointer; font-size:.85rem; }
   .chips { margin: .25rem 0 .5rem 0; display:flex; gap:.35rem; flex-wrap: wrap; }
   .topic { background:#e8f0fe; color:#1a73e8; padding:2px 10px; border-radius:9999px; font-size:.75rem; }
-  .tag { color:#fff; padding:2px 10px; border-radius:9999px; font-size:.75rem; display:inline-flex; align-items:center; gap:6px; }
+  .tag { color:#fff; padding:2px 10px; border-radius:9999px; font-size:.75rem; display:inline-flex; align-items:center; gap:6px; border:none; cursor:pointer; }
   .tag .tag-x { background:none; border:none; cursor:pointer; color:#fff; }
   .add-chip { background:#fff; color:#374151; border:1px solid #e5e7eb; border-radius:9999px; padding:2px 10px; cursor:pointer; }
   .tag-inline-editor { display:inline-flex; align-items:center; gap:.35rem; margin-left:.25rem; flex-wrap: wrap; }
   .tag-inline-editor .rename { flex:0 1 200px; border:1px solid #e5e7eb; border-radius:6px; padding:.3rem .45rem; }
-  .palette.small { position: static; display:inline-flex; margin: 4px 0 8px 0; padding:6px; border-radius:9999px; background:#fff; border:1px solid #e5e7eb; gap:6px; }
-  .palette.small button { width:34px; height:18px; border-radius:9999px; border:2px solid #fff; cursor:pointer; }
-  .palette.small button.selected { border-color:#111; box-shadow: 0 0 0 1px #111 inset; }
-  .palette.small button:focus-visible { outline:2px solid #111; outline-offset:2px; }
+  /* removed unused local palette overrides; ColorPalette provides its own styles */
   /* custom audio player replaces native controls */
   .text { background-color:#fff; padding:.5rem 1rem; border-left:5px solid #4285f4; margin:0; border-radius:4px; }
   .text p { margin: .25rem 0; }
@@ -253,7 +271,7 @@
   /* Hover state: light blue border to indicate selectability */
   .card:hover { outline-color: #93C5FD; /* tailwind sky-300 */ }
   /* Keyboard focus mirrors hover for accessibility */
-  .card:focus-visible { outline-color: #93C5FD; box-shadow: 0 0 0 3px rgba(147,197,253,0.35); }
+  .card-body:focus-visible { outline: 2px solid #93C5FD; box-shadow: 0 0 0 3px rgba(147,197,253,0.35); border-radius: 6px; }
   /* Selected state: solid primary blue border */
   .card.selected { outline-color: #3B82F6; /* tailwind blue-500 */ }
 

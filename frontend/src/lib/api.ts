@@ -22,6 +22,14 @@ export const api = {
     const res = await fetch(`${BACKEND_URL}/api/notes`, { method: 'POST', body: formData });
     return j<{ filename: string }>(res);
   },
+  async createTextNote(payload: { title?: string; transcription: string; date?: string; folder?: string; tags?: { label: string; color?: string }[] }): Promise<{ filename: string }>{
+    const res = await fetch(`${BACKEND_URL}/api/notes/text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return j<{ filename: string }>(res);
+  },
   async patchNoteFolder(filename: string, folder: string): Promise<void> {
     const res = await fetch(`${BACKEND_URL}/api/notes/${filename}/folder`, {
       method: 'PATCH',
@@ -49,4 +57,3 @@ export const api = {
     if (!res.ok) throw new Error('delete folder failed');
   },
 };
-

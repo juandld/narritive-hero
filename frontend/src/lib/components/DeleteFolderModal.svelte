@@ -13,8 +13,8 @@
 <Modal {open} title={`Delete folder “${name}”?`} on:close={close} width="min(520px, 92vw)">
   <div class="content">
     <p>This will permanently delete {count} note{count===1?'':'s'} inside this folder (audio and transcriptions). This cannot be undone.</p>
-    <label class="confirm">Type <code>delete</code> to confirm</label>
-    <input class="field" bind:value={input} placeholder="delete" />
+    <label class="confirm" for="confirm-input">Type <code>delete</code> to confirm</label>
+    <input id="confirm-input" class="field" bind:value={input} placeholder="delete" />
     <div class="actions">
       <button class="ghost" on:click={close}>Cancel</button>
       <button class="danger" disabled={input.trim().toLowerCase()!=='delete'} on:click={confirm}>Delete</button>

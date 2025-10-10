@@ -175,7 +175,7 @@
   .ghost { background:#f3f4f6; color:#111; border:1px solid #e5e7eb; padding:.35rem .6rem; border-radius:6px; cursor:pointer; }
   .small { font-size:.85rem; padding:.3rem .5rem; }
   .empty { color:#6b7280; }
-  h3 { margin:0; }
+  /* removed unused selector h3 */
   pre { overflow:auto; }
   @media (max-width: 640px){ .row { flex-direction: column; } }
 </style>

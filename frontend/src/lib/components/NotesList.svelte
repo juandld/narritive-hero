@@ -30,6 +30,7 @@
   function selectNote(event: CustomEvent<{ filename: string; selected: boolean; index: number; shift?: boolean }>) {
     dispatch('select', event.detail);
   }
+
 </script>
 
 {#if selectedFolder !== '__ALL__' && selectedFolder !== '__UNFILED__'}
@@ -52,7 +53,7 @@
 <h2>Saved Notes</h2>
 {#if notes.length > 0}
   <ul class:as-grid={layout === 'grid3'} class:compact={layout !== 'list'}>
-    {#each notes as note, i}
+    {#each notes as note, i (note.filename)}
       <NoteItem
         {note}
         expanded={expandedNotes.has(note.filename)}
