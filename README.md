@@ -1,6 +1,6 @@
 # Narrative Hero
 
-A web app to record voice notes and turn them into organized, searchable narratives. Notes are automatically transcribed and titled with Gemini (via LangChain), stored as lightweight JSON, and can be combined into narratives.
+A web app to capture voice notes and turn them into organized, searchable narratives. Notes are automatically transcribed and titled (Gemini via LangChain, with OpenAI fallbacks), stored as lightweight JSON, and can be combined into narratives or used to generate new ones with an LLM.
 
 ## Quick Start (TL;DR)
 
@@ -16,13 +16,13 @@ A web app to record voice notes and turn them into organized, searchable narrati
 ## Features
 
 - Voice capture and uploads: record in-browser or upload `.wav` files
-- Auto transcription and titles: Gemini 2.5 Flash via LangChain
-- Resilient providers: rotate multiple Gemini keys and fallback to OpenAI Whisper/Chat through LangChain
+- Auto transcription and titles: Gemini 2.5 Flash via LangChain (key rotation)
+- Resilient providers: rotate multiple Gemini keys and fallback to OpenAI Whisper/Chat
 - JSON metadata per note: title, transcription, date, duration, topics, tags
 - Filtering & search: by date range, topics, duration, and free-text query
 - Tags: add your own color-coded tags (with last-used color remembered)
 - Bulk actions: delete selected notes, create narratives from selection
-- Narratives drawer: list, open, and delete generated narratives
+- Narratives: list, open, delete, assign folders; generate or iterate with formats
 
 ## Data & Layout
 
@@ -34,6 +34,7 @@ A web app to record voice notes and turn them into organized, searchable narrati
 - Narratives page: `http://localhost:5173/narratives`
 - Backend dev server: `http://localhost:8000`
 - Docker: frontend on `:80`, backend on `:8000`
+- Compose volumes: voice notes, transcriptions, narratives mapped to `./storage/...` on host
 
 ## Tech Stack
 
@@ -46,7 +47,7 @@ A web app to record voice notes and turn them into organized, searchable narrati
 - Docker and Docker Compose (optional)
 - Node.js and npm (frontend)
 - Python 3.10+ and pip (backend)
-- API keys: Google AI (Gemini). Optional: OpenAI (fallback)
+- API keys: Google AI (Gemini). Optional: OpenAI (fallbacks)
 
 ## Running the Project
 
@@ -80,11 +81,12 @@ This is the recommended way to run the project.
     # Default target is Gemini 2.5 Flash. You can specify human-friendly names
     # (e.g., "gemini 2.5 flash" or "gemini-2.5-flash-002"); the backend
     # normalizes spaces and strips explicit version suffixes.
-    # If you need an exact model id with no normalization, set GOOGLE_MODEL_EXACT.
+    # If you need an exact model id (no normalization), set GOOGLE_MODEL_EXACT.
     # GOOGLE_MODEL="gemini 2.5 flash"
     # GOOGLE_MODEL_EXACT="gemini-2.5-flash"
     # OPENAI_TRANSCRIBE_MODEL="whisper-1"
     # OPENAI_TITLE_MODEL="gpt-4o-mini"
+    # OPENAI_NARRATIVE_MODEL="gpt-4o"
     ```
 
 3.  **Build and run the application with Docker Compose:**
@@ -168,13 +170,14 @@ This launches the Svelte dev server and the FastAPI dev server concurrently.
 - `storage/` consolidated app data
   - `storage/voice_notes/` source audio (e.g., `.wav`, `.mp3`)
   - `storage/transcriptions/` one JSON per note (see schema below)
-  - `storage/narratives/` saved narratives as `.txt`
+- `storage/narratives/` saved narratives as `.txt`
   - `storage/formats/` saved generation formats (JSON)
   - `storage/folders/` folders registry (JSON)
 - `compose.yaml` Docker Compose services
 
 Notes:
 - In Docker, the frontend is served as static files via Nginx and the browser calls the backend at `http://localhost:8000` directly (published from the backend container). No proxy is required.
+- Only `voice_notes`, `transcriptions`, and `narratives` are volume‑mapped by default. If you need `formats` and `folders` to persist across rebuilds, add volume mappings for `./storage/formats` and `./storage/folders` in `compose.yaml`.
 
 ## Environment Variables
 
@@ -186,6 +189,7 @@ Backend reads from `backend/.env` (copy from `.env.example`). Common keys:
 - `OPENAI_API_KEY` — optional fallback for Whisper/Chat
 - `OPENAI_TRANSCRIBE_MODEL` — default `whisper-1`
 - `OPENAI_TITLE_MODEL` — default `gpt-4o-mini`
+- `OPENAI_NARRATIVE_MODEL` — default `gpt-4o`
 
 Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (default `http://localhost:8000`).
 
@@ -235,10 +239,14 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
   - PATCH `/api/notes/{filename}/folder` → `{ "folder": "…" }` assign or clear a folder
 - Narratives
   - GET `/api/narratives` → list filenames
-  - GET `/api/narratives/{filename}` → `{ content, title? }` (title is AI-generated and stored as metadata)
+  - GET `/api/narratives/{filename}` → `{ content, title? }`
   - DELETE `/api/narratives/{filename}`
   - POST `/api/narratives` → body `[{"filename":"…wav"}, …]` creates concatenated narrative (simple join)
-  - POST `/api/narratives/generate` → generate via LLM (auto-titles the narrative and saves metadata)
+  - POST `/api/narratives/generate` → generate via LLM (auto-titles narrative and saves metadata)
+  - GET `/api/narratives/list` → list `{ filename, title?, folder }` for all narratives
+  - GET `/api/narratives/thread/{filename}` → return version thread for a narrative `{ files, index }`
+  - PATCH `/api/narratives/{filename}/folder` → set a folder for a narrative `{ folder }`
+  - GET `/api/narratives/folders` → list narrative folders `{ name, count }`
     - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
     - Includes each note's `date` alongside its `title` and text in the prompt context.
     - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`.
@@ -274,11 +282,11 @@ Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, thi
 - Upload works but no text appears: transcription runs in the background; refresh after a moment. If it failed, try “Retry” via `POST /api/notes/{filename}/retry` or re-upload.
 - 429/quota errors: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
 - Ports busy: adjust mappings in `compose.yaml` or run dev servers on different ports.
-- Chrome DevTools “project settings” notice: suppressed by `frontend/static/.well-known/appspecific/com.chrome.devtools.json`.
+- Non‑WAV audio requires FFmpeg at runtime for duration detection with pydub (Docker image installs FFmpeg; for local dev, install it via your OS package manager).
 
-## Frontend Unused Code
+## Frontend Notes
 
-The following frontend components/exports appear unused based on a static search of imports/references in `frontend/src`.
+Some legacy components/exports are present and appear unused based on a static search of imports/references in `frontend/src`.
 
 - Components
   - `frontend/src/lib/components/FileUpload.svelte` — superseded by the Topbar upload button and `pageDrop` action.
@@ -290,15 +298,11 @@ The following frontend components/exports appear unused based on a static search
   - `frontend/src/lib/stores/folders.ts: folderActions.refresh`
 
 Notes
-- Detection method: searched for import/use of each file and exported symbol via ripgrep across `frontend/src`.
-- Caveat: if any usage occurs dynamically (e.g., via code-splitting or string-based imports), it wouldn’t be caught by this heuristic. None were observed in this codebase.
-- Next step: if you agree, I can remove these files/exports in a follow-up cleanup PR.
+- Detection method: static search across `frontend/src`.
+- Caveat: dynamic usage (code-splitting or string imports) would not be detected.
+- If you want, we can remove these in a follow‑up cleanup.
 
-## LangHero (separate app)
-
-- The previous experimental "Learn" route has been split out into its own project: `langhero`.
-- Location: `/home/raw/projects/langhero` (same stack and dev/deploy flow as this project).
-- Run it the same way (Docker Compose or separate backend/frontend dev). Its frontend root renders the scenario UI and uses its own backend copy of the scenario route.
+<!-- Former experimental route (LangHero) has been removed from this app; scenario functionality lives in a separate project and is not required here. -->
 
 <!-- duplicate Testing/Troubleshooting sections removed; content merged into single sections -->
 
@@ -307,7 +311,7 @@ Notes
 - Use multiple Gemini keys to smooth through quota spikes
 - Add OpenAI key for reliable fallback
 - To reprocess a note, delete its JSON; backend will recreate it on startup or next upload
-- FFmpeg with pydub improves audio format handling (pydub installed; add FFmpeg if needed)
+- FFmpeg with pydub improves audio format handling (Docker installs FFmpeg; add it locally if needed)
 
 ## Testing
 
