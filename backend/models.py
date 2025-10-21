@@ -12,3 +12,6 @@ class Tag(BaseModel):
 
 class TagsUpdate(BaseModel):
     tags: List[Tag]
+
+class FolderUpdate(BaseModel):
+    folder: Optional[str] = None

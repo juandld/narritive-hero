@@ -16,7 +16,7 @@ from fastapi import FastAPI, File, UploadFile, Form, Response, Request, Backgrou
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from services import get_notes, transcribe_and_save
-from models import TagsUpdate
+from models import TagsUpdate, FolderUpdate
 from utils import on_startup
 import uvicorn
 import os
@@ -26,7 +26,9 @@ import uuid
 import asyncio
 from langchain_core.messages import HumanMessage
 import providers
+import note_store as _ns
 import config
+import note_store as _note_store
 
 app = FastAPI()
 
@@ -48,6 +50,7 @@ app.add_middleware(
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 NARRATIVES_DIR = config.NARRATIVES_DIR
+NARRATIVE_META_DIR = os.path.join(NARRATIVES_DIR, 'meta')
 FORMATS_DIR = getattr(config, 'FORMATS_DIR', os.path.join(config.STORAGE_DIR, 'formats'))
 
 # Mount static files directory for voice notes
@@ -109,18 +112,100 @@ async def retry_note(background_tasks: BackgroundTasks, filename: str):
 async def delete_note(filename: str):
     """API endpoint to delete a note."""
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
+    base_filename = os.path.splitext(filename)[0]
+    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
+    legacy_txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
+    deleted_any = False
+    # Delete audio file if present
     if os.path.exists(file_path):
-        os.remove(file_path)
-        # Delete associated JSON (and legacy txt)
-        base_filename = os.path.splitext(filename)[0]
-        json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
-        legacy_txt_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.txt")
-        if os.path.exists(json_path):
+        try:
+            os.remove(file_path)
+            deleted_any = True
+        except Exception:
+            pass
+    # Always attempt to delete associated JSON (and legacy txt) even if audio missing
+    if os.path.exists(json_path):
+        try:
             os.remove(json_path)
-        if os.path.exists(legacy_txt_path):
+            deleted_any = True
+        except Exception:
+            pass
+    if os.path.exists(legacy_txt_path):
+        try:
             os.remove(legacy_txt_path)
-        return Response(status_code=200)
-    return Response(status_code=404)
+            deleted_any = True
+        except Exception:
+            pass
+    return Response(status_code=200 if deleted_any else 404)
+
+@app.post("/api/notes/text")
+async def create_text_note(request: Request):
+    """Create a note directly from provided transcription text (no audio).
+
+    Body JSON: { transcription: string, title?: string, date?: string, folder?: string, tags?: [{label,color?}] }
+    Returns: { filename }
+    """
+    try:
+        body = await request.json()
+        transcription = str((body or {}).get("transcription") or "").strip()
+        title = str((body or {}).get("title") or "").strip()
+        date_override = str((body or {}).get("date") or "").strip()
+        folder = str((body or {}).get("folder") or "").strip()
+        tags = (body or {}).get("tags") or []
+        if not transcription:
+            return Response(status_code=400)
+
+        # Generate a unique id and pseudo filename (non-audio)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        nid = f"text-{stamp}-{uuid.uuid4().hex[:6]}"
+        pseudo_filename = f"{nid}.txt"
+
+        # Auto-generate title if missing via Gemini with OpenAI fallback
+        if not title:
+            try:
+                title_message = HumanMessage(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": (
+                                "Return exactly one short title (5–8 words) for the transcription below. "
+                                "Use the same language as the transcription. Do not include quotes, bullets, markdown, or any extra text. "
+                                "Output only the title on a single line.\n\n" + transcription
+                            ),
+                        },
+                    ]
+                )
+                title_response, _ = await asyncio.to_thread(
+                    providers.invoke_google, [title_message]
+                )
+                title = providers.normalize_title_output(getattr(title_response, "content", ""))
+            except Exception:
+                try:
+                    title = providers.title_with_openai(transcription)
+                except Exception:
+                    # Fallback: derive from transcription snippet instead of id
+                    words = (transcription or '').strip().split()
+                    title = ' '.join(words[:8]) if words else 'Text Note'
+
+        # Build payload similar to build_note_payload but without audio metadata
+        data = {
+            "filename": pseudo_filename,
+            "title": (title or '').strip() or 'Text Note',
+            "transcription": transcription,
+            "date": date_override or datetime.now().strftime('%Y-%m-%d'),
+            "length_seconds": None,
+            "topics": _note_store.infer_topics(transcription, title or None),
+            "language": _note_store.infer_language(transcription, title or None),
+            "folder": folder,
+            "tags": [ {"label": str((t or {}).get("label") or "").strip(), "color": (t or {}).get("color") } for t in tags if isinstance(t, dict) and (t.get("label") or "").strip() ],
+        }
+        # Persist JSON
+        os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+        with open(os.path.join(TRANSCRIPTS_DIR, f"{nid}.json"), 'w') as jf:
+            json.dump(data, jf, ensure_ascii=False)
+        return {"filename": pseudo_filename}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.patch("/api/notes/{filename}/tags")
 async def update_tags(filename: str, payload: TagsUpdate):
@@ -145,6 +230,40 @@ async def update_tags(filename: str, payload: TagsUpdate):
     except Exception as e:
         return {"error": str(e)}
 
+@app.patch("/api/notes/{filename}/folder")
+async def update_folder(filename: str, payload: FolderUpdate):
+    """Update the folder for a note (stored in JSON). Pass folder: string or null/empty to clear."""
+    base_filename = os.path.splitext(filename)[0]
+    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base_filename}.json")
+    if not os.path.exists(json_path):
+        # Create a minimal JSON so folder assignment works even before transcription
+        try:
+            audio_path = os.path.join(VOICE_NOTES_DIR, filename)
+            if not os.path.exists(audio_path):
+                # try to find by any known extension
+                for ext in ('.wav', '.ogg', '.webm', '.m4a', '.mp3'):
+                    p = os.path.join(VOICE_NOTES_DIR, base_filename + ext)
+                    if os.path.exists(p):
+                        audio_path = p
+                        filename = os.path.basename(p)
+                        break
+            import note_store as _ns
+            # Use base as title, empty transcription (will be filled when background task runs)
+            payload_min = _ns.build_note_payload(filename, base_filename, "")
+            _ns.save_note_json(base_filename, payload_min)
+        except Exception:
+            return Response(status_code=404)
+    try:
+        import json
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        data["folder"] = (payload.folder or "").strip()
+        with open(json_path, 'w') as f:
+            json.dump(data, f, ensure_ascii=False)
+        return {"status": "ok", "folder": data["folder"]}
+    except Exception as e:
+        return {"error": str(e)}
+
 # ----------------- Narratives API -----------------
 
 @app.get("/api/narratives")
@@ -160,7 +279,17 @@ async def get_narrative(filename: str):
     if os.path.exists(path):
         with open(path, 'r') as f:
             content = f.read()
-        return {"content": content}
+        # Try to include a generated/display title if available
+        title = None
+        try:
+            mp = os.path.join(NARRATIVE_META_DIR, f"{filename}.json")
+            if os.path.exists(mp):
+                with open(mp, 'r') as mf:
+                    md = json.load(mf)
+                title = (md or {}).get('title')
+        except Exception:
+            title = None
+        return {"content": content, "title": title}
     return Response(status_code=404)
 
 @app.delete("/api/narratives/{filename}")
@@ -205,8 +334,44 @@ async def create_narrative_from_notes(request: Request):
         from datetime import datetime
         name = f"narrative-{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         out = os.path.join(NARRATIVES_DIR, name)
+        content = "\n".join(parts)
         with open(out, 'w') as f:
-            f.write("\n".join(parts))
+            f.write(content)
+        # Generate a short title for this narrative and save metadata
+        try:
+            os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+            # Prefer first heading or first non-empty line as quick baseline
+            title = None
+            for ln in content.splitlines():
+                s = (ln or '').strip()
+                if not s: continue
+                if s.startswith('#'):
+                    s = s.lstrip('#').strip()
+                title = s
+                break
+            # Refine via LLM if possible
+            if title:
+                try:
+                    msg = HumanMessage(content=[{"type": "text", "text": (
+                        "Return exactly one short title (5–8 words) for the narrative below. "
+                        "Do not include quotes, bullets, markdown, or extra text. Output only the title on one line.\n\n" + content[:4000]
+                    )}])
+                    resp, _ = await asyncio.to_thread(providers.invoke_google, [msg])
+                    title_llm = providers.normalize_title_output(getattr(resp, 'content', ''))
+                    if title_llm:
+                        title = title_llm
+                except Exception:
+                    try:
+                        from langchain_core.messages import HumanMessage as _HM
+                        title = providers.title_with_openai(content[:4000]) or title
+                    except Exception:
+                        pass
+            if not title:
+                title = os.path.splitext(name)[0]
+            with open(os.path.join(NARRATIVE_META_DIR, f"{name}.json"), 'w') as mf:
+                json.dump({"title": title}, mf, ensure_ascii=False)
+        except Exception:
+            pass
         return {"filename": name}
     except Exception as e:
         return {"error": str(e)}
@@ -243,25 +408,108 @@ async def generate_narrative(request: Request):
         format_ids = (body or {}).get("format_ids") or []
         format_prompt_inline = (body or {}).get("format_prompt")
 
-        # Collect sources
+        # Collect sources (notes or existing narratives) with diagnostics
         if not isinstance(items, list):
             return Response(status_code=400)
         sources = []
+        dbg_sources = []  # diagnostics for user: title/date/length/preview per source
         for it in items:
             name = (it or {}).get("filename")
             if not name or not isinstance(name, str):
                 continue
             base = os.path.splitext(name)[0]
-            json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
             title = base
             text = ""
-            if os.path.exists(json_path):
-                import json
-                with open(json_path, "r") as jf:
-                    data = json.load(jf)
-                title = data.get("title") or title
-                text = data.get("transcription") or ""
-            sources.append((title, text))
+            date_str = ""
+            kind = "note"
+            if name.lower().endswith('.txt'):
+                # If it's a real narrative file, use its content; otherwise, treat as note JSON-only
+                narr_path = os.path.join(NARRATIVES_DIR, name)
+                if os.path.exists(narr_path):
+                    try:
+                        with open(narr_path, 'r') as nf:
+                            text = nf.read()
+                    except Exception:
+                        text = ""
+                    # try meta title/date
+                    try:
+                        mp = os.path.join(NARRATIVE_META_DIR, f"{name}.json")
+                        if os.path.exists(mp):
+                            with open(mp, 'r') as mf:
+                                md = json.load(mf)
+                            title = md.get('title') or title
+                            date_str = (md.get('date') or '').strip()
+                    except Exception:
+                        pass
+                    kind = "narrative"
+                else:
+                    # Fall back to note JSON by base name
+                    json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
+                    if os.path.exists(json_path):
+                        import json
+                        with open(json_path, "r") as jf:
+                            data = json.load(jf)
+                        title = data.get("title") or title
+                        text = data.get("transcription") or ""
+                        date_str = (data.get("date") or "").strip()
+                    kind = "note"
+            else:
+                # Note JSON source
+                json_path = os.path.join(TRANSCRIPTS_DIR, f"{base}.json")
+                if os.path.exists(json_path):
+                    import json
+                    with open(json_path, "r") as jf:
+                        data = json.load(jf)
+                    title = data.get("title") or title
+                    text = data.get("transcription") or ""
+                    date_str = (data.get("date") or "").strip()
+                # If date missing, derive from audio mtime or filename pattern
+                if not date_str:
+                    try:
+                        ap = None
+                        try:
+                            ap = _ns._find_audio_path(base, data if 'data' in locals() else {})
+                        except Exception:
+                            ap = None
+                        if ap and os.path.exists(ap):
+                            mtime = os.path.getmtime(ap)
+                            date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+                        else:
+                            # Try parsing YYYYMMDD from base
+                            import re
+                            m = re.match(r"^(\\d{4})(\\d{2})(\\d{2})", base)
+                            if m:
+                                date_str = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+                    except Exception:
+                        pass
+            # Normalize low-quality titles like id-looking placeholders
+            try:
+                if (not title) or title.lower() in ("untitled", "title generation failed."):
+                    title = (text or '').strip().split('\n', 1)[0].strip() or (title or '')
+                import re as _re
+                if _re.fullmatch(r"text-\d{14,}-[a-f0-9]{4,}", title or ''):
+                    # derive from first words of content
+                    head = ' '.join(((text or '').strip().split() or [])[:8]).strip()
+                    title = head or 'Text Note'
+            except Exception:
+                pass
+            # Build diagnostics for this source
+            try:
+                preview = (text or '').strip().replace("\n", " ")[:140]
+                dbg_sources.append({
+                    "kind": kind,
+                    "filename": name,
+                    "title": (title or '')[:120],
+                    "date": date_str or "",
+                    "text_len": len(text or ''),
+                    "text_preview": preview,
+                })
+            except Exception:
+                pass
+            # Skip entirely empty entries
+            if not (text or '').strip():
+                continue
+            sources.append({"title": title, "text": text, "date": date_str or ""})
 
         if not sources and not extra_text.strip():
             return Response(status_code=400)
@@ -299,12 +547,21 @@ async def generate_narrative(request: Request):
         except Exception:
             pass
         parts.append("\n\nContext Notes:\n")
-        for i, (title, text) in enumerate(sources, start=1):
-            parts.append(f"[{i}] {title}\n{text}\n")
+        for i, src in enumerate(sources, start=1):
+            t = src.get("title")
+            tx = src.get("text") or ""
+            d = (src.get("date") or "").strip()
+            header = f"[{i}] {d} — {t}" if d else f"[{i}] {t}"
+            parts.append(f"{header}\n{tx}\n")
         if extra_text.strip():
             parts.append("\nAdditional Context:\n" + extra_text.strip() + "\n")
         parts.append("\nWrite the narrative now.")
         prompt_text = "\n".join(parts)
+        try:
+            logging.info("[gen] items=%s sources=%s", len(items), json.dumps(dbg_sources)[:2000])
+            logging.info("[gen] prompt_head=%s", (prompt_text[:800] + ('…' if len(prompt_text)>800 else '')))
+        except Exception:
+            pass
 
         # Call provider
         content = None
@@ -338,6 +595,41 @@ async def generate_narrative(request: Request):
         out = os.path.join(NARRATIVES_DIR, name)
         with open(out, "w") as f:
             f.write(content or "")
+
+        # Generate and persist a short display title for this narrative
+        try:
+            os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+            title = None
+            # Prefer first heading or first non-empty line if model fails
+            for ln in (content or '').splitlines():
+                s = (ln or '').strip()
+                if not s: continue
+                if s.startswith('#'):
+                    s = s.lstrip('#').strip()
+                title = s
+                break
+            try:
+                msg = HumanMessage(content=[{"type": "text", "text": (
+                    "Return exactly one short title (5–8 words) for the narrative below. "
+                    "Do not include quotes, bullets, markdown, or extra text. Output only the title on one line.\n\n" + (content or '')[:4000]
+                )}])
+                resp, _ = await asyncio.to_thread(providers.invoke_google, [msg])
+                title_llm = providers.normalize_title_output(getattr(resp, 'content', ''))
+                if title_llm:
+                    title = title_llm
+            except Exception:
+                try:
+                    title_oa = providers.title_with_openai((content or '')[:4000])
+                    if title_oa:
+                        title = title_oa
+                except Exception:
+                    pass
+            if not title:
+                title = os.path.splitext(name)[0]
+            with open(os.path.join(NARRATIVE_META_DIR, f"{name}.json"), 'w') as mf:
+                json.dump({"title": title}, mf, ensure_ascii=False)
+        except Exception:
+            pass
 
         # --- Version threading: record parent→child relationship ---
         try:
@@ -475,6 +767,187 @@ async def create_or_update_format(request: Request):
         with open(path, 'w') as f:
             json.dump({'id': fid, 'title': title, 'prompt': prompt}, f, ensure_ascii=False)
         return {'id': fid}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ----------------- Narrative Folders API -----------------
+
+def _narrative_meta_path(filename: str) -> str:
+    os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+    return os.path.join(NARRATIVE_META_DIR, f"{filename}.json")
+
+def _read_narrative_meta(filename: str) -> dict:
+    try:
+        p = _narrative_meta_path(filename)
+        if os.path.exists(p):
+            with open(p, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _write_narrative_meta(filename: str, data: dict) -> None:
+    os.makedirs(NARRATIVE_META_DIR, exist_ok=True)
+    p = _narrative_meta_path(filename)
+    tmp = p + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data or {}, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+@app.get("/api/narratives/list")
+async def list_narratives_meta():
+    os.makedirs(NARRATIVES_DIR, exist_ok=True)
+    files = [f for f in sorted(os.listdir(NARRATIVES_DIR)) if f.endswith('.txt')]
+    out = []
+    for fn in files:
+        meta = _read_narrative_meta(fn)
+        out.append({
+            'filename': fn,
+            'title': meta.get('title'),
+            'folder': (meta.get('folder') or '').strip(),
+        })
+    return out
+
+@app.patch("/api/narratives/{filename}/folder")
+async def set_narrative_folder(filename: str, request: Request):
+    try:
+        body = await request.json()
+        folder = str((body or {}).get('folder') or '').strip()
+        meta = _read_narrative_meta(filename)
+        meta['folder'] = folder
+        _write_narrative_meta(filename, meta)
+        return { 'status': 'ok', 'folder': folder }
+    except Exception as e:
+        return { 'error': str(e) }
+
+@app.get("/api/narratives/folders")
+async def list_narrative_folders():
+    os.makedirs(NARRATIVES_DIR, exist_ok=True)
+    files = [f for f in sorted(os.listdir(NARRATIVES_DIR)) if f.endswith('.txt')]
+    counts: dict[str,int] = {}
+    for fn in files:
+        try:
+            meta = _read_narrative_meta(fn)
+            folder = (meta.get('folder') or '').strip()
+            if folder:
+                counts[folder] = counts.get(folder, 0) + 1
+        except Exception:
+            continue
+    out = [{ 'name': k, 'count': v } for k,v in sorted(counts.items(), key=lambda kv: kv[0].lower())]
+    return out
+
+
+# ----------------- Folders API -----------------
+
+def _folders_registry_path() -> str:
+    os.makedirs(config.FOLDERS_DIR, exist_ok=True)
+    return os.path.join(config.FOLDERS_DIR, "folders.json")
+
+def _load_folders_registry() -> list[str]:
+    try:
+        p = _folders_registry_path()
+        if not os.path.exists(p):
+            return []
+        with open(p, "r") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [str(x) for x in data if isinstance(x, str)]
+        return []
+    except Exception:
+        return []
+
+def _save_folders_registry(names: list[str]) -> None:
+    p = _folders_registry_path()
+    tmp = p + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sorted(list({n.strip(): None for n in names if n and isinstance(n, str)}.keys()), key=lambda s: s.lower()), f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+@app.get("/api/folders")
+async def list_folders():
+    """Return a list of folders with counts, combining registry + derived from note JSONs."""
+    os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+    counts: dict[str, int] = {}
+    for fn in os.listdir(TRANSCRIPTS_DIR):
+        if not fn.endswith('.json'):
+            continue
+        try:
+            with open(os.path.join(TRANSCRIPTS_DIR, fn), 'r') as f:
+                data = json.load(f)
+            folder = (data.get('folder') or '').strip()
+            if folder:
+                counts[folder] = counts.get(folder, 0) + 1
+        except Exception:
+            continue
+    # include zero-count folders from registry
+    reg = _load_folders_registry()
+    for n in reg:
+        counts.setdefault(n, 0)
+    out = [{"name": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: kv[0].lower())]
+    return out
+
+@app.post("/api/folders")
+async def create_folder(request: Request):
+    try:
+        body = await request.json()
+        name = str((body or {}).get("name") or "").strip()
+        if not name:
+            return Response(status_code=400)
+        # basic sanitation: disallow path separators
+        if "/" in name or "\\" in name:
+            return Response(status_code=400)
+        reg = _load_folders_registry()
+        if name not in reg:
+            reg.append(name)
+            _save_folders_registry(reg)
+        return {"name": name}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.delete("/api/folders/{name}")
+async def delete_folder(name: str):
+    """Delete a folder and PERMANENTLY DELETE all notes inside it.
+
+    Removes the folder from the registry and deletes corresponding audio files
+    and transcription JSONs for notes assigned to that folder.
+    """
+    try:
+        clean = (name or "").strip()
+        reg = _load_folders_registry()
+        # Delete notes in this folder
+        deleted_notes = 0
+        import note_store as _ns
+        for fn in list(os.listdir(TRANSCRIPTS_DIR)):
+            if not fn.endswith('.json'):
+                continue
+            jp = os.path.join(TRANSCRIPTS_DIR, fn)
+            try:
+                with open(jp, 'r') as f:
+                    data = json.load(f)
+                if (data.get('folder') or '').strip() == clean:
+                    base = os.path.splitext(fn)[0]
+                    # locate audio
+                    ap = None
+                    try:
+                        ap = _ns._find_audio_path(base, data)
+                    except Exception:
+                        ap = None
+                    # delete files
+                    if ap and os.path.exists(ap):
+                        try: os.remove(ap)
+                        except Exception: pass
+                    try: os.remove(jp)
+                    except Exception: pass
+                    deleted_notes += 1
+            except Exception:
+                continue
+        # Remove folder from registry
+        if clean in reg:
+            reg = [n for n in reg if n != clean]
+            _save_folders_registry(reg)
+        return {"deleted": clean, "notes_deleted": deleted_notes}
     except Exception as e:
         return {"error": str(e)}
 

@@ -19,6 +19,7 @@ VOICE_NOTES_DIR = os.path.join(STORAGE_DIR, "voice_notes")
 TRANSCRIPTS_DIR = os.path.join(STORAGE_DIR, "transcriptions")
 NARRATIVES_DIR = os.path.join(STORAGE_DIR, "narratives")
 FORMATS_DIR = os.path.join(STORAGE_DIR, "formats")
+FOLDERS_DIR = os.path.join(STORAGE_DIR, "folders")
 
 # Models and providers
 def _normalize_google_model(name: str) -> str:

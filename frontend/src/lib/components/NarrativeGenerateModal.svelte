@@ -42,7 +42,7 @@
     </div>
     <div class="modal-body">
       <p style="margin:0 0 .5rem 0; color:#6b7280;">{selected.length} note(s) selected</p>
-      <label>Formats (optional)</label>
+      <div class="label">Formats (optional)</div>
       <div class="formats-list">
         {#each formats as f}
           <label class="fmt"><input type="checkbox" checked={format_ids.includes(f.id)} on:change={(e) => {
@@ -98,6 +98,7 @@
   .modal-header { display: flex; align-items: center; justify-content: space-between; }
   .modal-body { display: flex; flex-direction: column; gap: .75rem; }
   label { font-size: .9rem; color: #374151; }
+  .label { font-size: .9rem; color: #374151; }
   textarea { min-height: 120px; resize: vertical; padding: .5rem; border: 1px solid #e5e7eb; border-radius: 6px; }
   input[type="text"], select { padding: .5rem; border: 1px solid #e5e7eb; border-radius: 6px; width: 100%; }
   .row { display: flex; gap: .75rem; }

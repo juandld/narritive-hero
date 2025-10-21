@@ -1,80 +1,79 @@
 <script lang="ts">
   // Compact, reusable filter bar. Emits a 'change' event with the current filters.
   import { createEventDispatcher } from 'svelte';
+  import type { Filters } from '$lib/stores/filters';
 
-  export type Filters = {
-    dateFrom: string;
-    dateTo: string;
-    topics: string;
-    minLen: number | '';
-    maxLen: number | '';
-    search: string;
-  };
-
-  export let filters: Filters = {
+  let { filters = $bindable<Filters>({
     dateFrom: '',
     dateTo: '',
     topics: '',
-    minLen: '',
-    maxLen: '',
-    search: ''
-  };
+    minLen: '' as any,
+    maxLen: '' as any,
+    search: '',
+    sortKey: 'date',
+    sortDir: 'desc'
+  }), counts = { total: 0, filtered: 0 } } = $props();
 
-  // Local, mutable copy for Svelte 5 (avoid binding directly to props)
-  let local = { ...filters } as Filters;
-
-  export let counts: { total: number; filtered: number } = { total: 0, filtered: 0 };
+  // Operate directly on bindable `filters`
 
   const dispatch = createEventDispatcher();
   function emit() {
-    // Debug log emitted filters
-    console.log('[FiltersBar] emit', JSON.stringify(local));
-    dispatch('change', { ...local });
+    dispatch('change', { ...filters });
   }
   function selectAll() { dispatch('selectAll'); }
   function clearSelection() { dispatch('clearSelection'); }
   function reset() {
-    local = { dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '' };
+    filters = { dateFrom: '', dateTo: '', topics: '', minLen: '' as any, maxLen: '' as any, search: '', sortKey: 'date', sortDir: 'desc' };
     emit();
   }
-
-  // Keep local state in sync if parent replaces filters
-  $: if (filters !== local) {
-    // shallow compare by reference; assign when parent updates
-    local = { ...filters };
-  }
+  // No reactive sync needed in runes mode
 </script>
 
 <div class="filters">
   <div class="field">
     <label for="f-date-from">Date from</label>
-    <input id="f-date-from" type="date" value={local.dateFrom} on:change={(e) => { local.dateFrom = (e.target as HTMLInputElement).value; emit(); }} />
+    <input id="f-date-from" type="date" value={filters.dateFrom} onchange={(e) => { filters = { ...filters, dateFrom: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-date-to">Date to</label>
-    <input id="f-date-to" type="date" value={local.dateTo} on:change={(e) => { local.dateTo = (e.target as HTMLInputElement).value; emit(); }} />
+    <input id="f-date-to" type="date" value={filters.dateTo} onchange={(e) => { filters = { ...filters, dateTo: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-topics">Topics</label>
-    <input id="f-topics" placeholder="e.g. meeting, travel" value={local.topics} on:input={(e) => { local.topics = (e.target as HTMLInputElement).value; emit(); }} />
+    <input id="f-topics" placeholder="e.g. meeting, travel" value={filters.topics} oninput={(e) => { filters = { ...filters, topics: (e.target as HTMLInputElement).value }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-min">Min sec</label>
-    <input id="f-min" type="number" min="0" value={local.minLen} on:input={(e) => { const v = (e.target as HTMLInputElement).value; local.minLen = v === '' ? '' : Number(v); emit(); }} />
+    <input id="f-min" type="number" min="0" value={filters.minLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, minLen: v === '' ? '' : Number(v) as any }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-max">Max sec</label>
-    <input id="f-max" type="number" min="0" value={local.maxLen} on:input={(e) => { const v = (e.target as HTMLInputElement).value; local.maxLen = v === '' ? '' : Number(v); emit(); }} />
+    <input id="f-max" type="number" min="0" value={filters.maxLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, maxLen: v === '' ? '' : Number(v) as any }; emit(); }} />
   </div>
   <div class="field search">
     <label for="f-search">Search</label>
-    <input id="f-search" placeholder="search title or text" value={local.search} on:input={(e) => { local.search = (e.target as HTMLInputElement).value; emit(); }} />
+    <input id="f-search" placeholder="search title or text" value={filters.search} oninput={(e) => { filters = { ...filters, search: (e.target as HTMLInputElement).value }; emit(); }} />
+  </div>
+  <div class="field">
+    <label for="f-sort">Sort by</label>
+    <div class="sort-row">
+      <select id="f-sort" bind:value={filters.sortKey} onchange={() => { filters = { ...filters }; emit(); }}>
+        <option value="date">Date</option>
+        <option value="type">Type</option>
+        <option value="length">Length</option>
+        <option value="language">Language</option>
+      </select>
+      <select bind:value={filters.sortDir} onchange={() => { filters = { ...filters }; emit(); }}>
+        <option value="asc">Asc</option>
+        <option value="desc">Desc</option>
+      </select>
+    </div>
   </div>
   <div class="actions">
-    <button type="button" class="reset-button" on:click={reset}>Reset Filters</button>
+    <button type="button" class="reset-button" onclick={reset}>Reset Filters</button>
     <div class="select-actions">
-      <button type="button" class="sel" title="Select all filtered" on:click={selectAll}>Select all ({counts.filtered})</button>
-      <button type="button" class="sel" title="Clear selection" on:click={clearSelection}>Clear</button>
+      <button type="button" class="sel" title="Select all filtered" onclick={selectAll}>Select all ({counts.filtered})</button>
+      <button type="button" class="sel" title="Clear selection" onclick={clearSelection}>Clear</button>
     </div>
     <div class="results-info">{counts.filtered} of {counts.total}</div>
   </div>
@@ -83,7 +82,7 @@
 <style>
   .filters {
     display: grid;
-    grid-template-columns: repeat(6, minmax(140px, 1fr));
+    grid-template-columns: repeat(7, minmax(140px, 1fr));
     grid-auto-rows: min-content;
     gap: 0.75rem 0.75rem;
     margin-bottom: 1rem;
@@ -101,8 +100,7 @@
     font-size: 0.8rem;
     color: #555;
   }
-  .field input,
-  .field select {
+  .field input {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
@@ -110,15 +108,18 @@
     text-overflow: ellipsis;
   }
   .field.search { grid-column: span 2; }
+  .sort-row { display:flex; gap:.35rem; }
   .actions {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.75rem;
     grid-column: 1 / -1; /* full width */
-    flex-wrap: wrap;
   }
-  .select-actions { display:flex; gap:.35rem; }
+  .actions > * { min-width: 0; }
+  .reset-button { grid-column: 1; }
+  .select-actions { grid-column: 1; display:flex; flex-wrap: wrap; gap:.35rem; min-width: 0; }
+  .sel { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .sel { background:#fff; color:#374151; border:1px solid #e5e7eb; padding: .35rem .6rem; border-radius: 6px; cursor: pointer; }
   .reset-button {
     background: #6c757d;
@@ -129,6 +130,7 @@
     cursor: pointer;
   }
   .results-info {
+    grid-column: 1;
     font-size: 0.85rem;
     color: #666;
     white-space: nowrap;
@@ -140,5 +142,7 @@
   @media (max-width: 600px) {
     .filters { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
     .field.search { grid-column: span 2; }
+    .actions { grid-template-columns: 1fr; }
+    .results-info { grid-column: 1; justify-self: end; }
   }
 </style>

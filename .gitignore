@@ -25,18 +25,11 @@ Thumbs.db
 # Log files
 *.log
 
-# Exclude all contents of voice_notes folder, but keep the folder
-voice_notes/*
-!voice_notes/.gitkeep
-
-# Exclude all contents of transcriptions folder, but keep the folder
-transcriptions/*
-!transcriptions/.gitkeep
-
-
-# Exclude all contents of narratives folder, but keep the folder
-narratives/*
-!narratives/.gitkeep
+## Storage data (binary + generated) — keep structure only
+# Ignore everything inside storage, but keep directory skeleton via .gitkeep files
+storage/**
+!storage/.gitkeep
+!storage/**/.gitkeep
 
 
 # Python cache files

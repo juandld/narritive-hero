@@ -18,6 +18,7 @@
   import NarrativeIterateModal from './NarrativeIterateModal.svelte';
 
   let isIterateOpen: boolean = false;
+  let isGenerating: boolean = false;
   let selectedExcerpt: string = '';
   let renderEl: HTMLDivElement | null = null;
   let thread: { files: string[]; index: number } = { files: [], index: 0 };
@@ -41,7 +42,7 @@
       const response = await fetch(`${BACKEND_URL}/api/narratives/${filename}`);
       if (response.ok) {
         const data = await response.json();
-        selectedNarrative = { filename, content: data.content };
+        selectedNarrative = { filename, content: data.content, title: (data as any).title } as any;
         try {
           const tr = await fetch(`${BACKEND_URL}/api/narratives/thread/${filename}`);
           if (tr.ok) {
@@ -190,10 +191,15 @@
       if (!renderEl || !renderEl.contains(range.commonAncestorContainer)) return;
       const text = sel.toString().trim();
       selectedExcerpt = text || '';
-    } catch (e) {
-      // ignore
-    }
+    } catch {}
   }
+
+  // Use document-level selectionchange to avoid mouse/keyboard handlers on non-interactive elements
+  onMount(() => {
+    const handler = () => updateSelection();
+    document.addEventListener('selectionchange', handler);
+    return () => { document.removeEventListener('selectionchange', handler); };
+  });
 
   function clearSelection() {
     selectedExcerpt = '';
@@ -228,14 +234,17 @@
       <div class="narrative-content">
         {#if selectedNarrative}
           <div class="content-header">
-            <h3 class="filename">{selectedNarrative.filename}</h3>
+            <h3 class="filename">{selectedNarrative.title || selectedNarrative.filename}</h3>
             <div class="toolbar">
-              <button class="btn" title="Previous version" on:click={() => gotoVersion(-1)} disabled={thread.index <= 0}>◀</button>
+              <button class="btn" title="Previous version" on:click={() => gotoVersion(-1)} disabled={thread.index <= 0 || isGenerating}>◀</button>
               <span class="ver">v {thread.index + 1}/{Math.max(thread.files.length, 1)}</span>
-              <button class="btn" title="Next version" on:click={() => gotoVersion(1)} disabled={thread.index >= thread.files.length - 1}>▶</button>
-              <button class="btn primary" on:click={() => (isIterateOpen = true)}>Iterate</button>
-              <button class="btn" on:click={() => (isIterateOpen = true)} disabled={!selectedExcerpt}>Iterate Selection</button>
-              <button class="btn danger" on:click={() => deleteNarrative(selectedNarrative!.filename)}>Delete</button>
+              <button class="btn" title="Next version" on:click={() => gotoVersion(1)} disabled={thread.index >= thread.files.length - 1 || isGenerating}>▶</button>
+              <button class="btn primary" on:click={() => (isIterateOpen = true)} disabled={isGenerating}>Iterate</button>
+              <button class="btn" on:click={() => (isIterateOpen = true)} disabled={!selectedExcerpt || isGenerating}>Iterate Selection</button>
+              <button class="btn danger" on:click={() => deleteNarrative(selectedNarrative!.filename)} disabled={isGenerating}>Delete</button>
+              {#if isGenerating}
+                <span class="loading">Generating…</span>
+              {/if}
             </div>
           </div>
           {#if selectedExcerpt}
@@ -244,7 +253,7 @@
               <button class="link" on:click={clearSelection}>Clear</button>
             </div>
           {/if}
-          <div class="narrative-render" bind:this={renderEl} on:mouseup={updateSelection} on:keyup={updateSelection}>
+          <div class="narrative-render" role="region" aria-label="Narrative content" bind:this={renderEl}>
             {@html selectedHtml}
           </div>
         {:else}
@@ -261,8 +270,11 @@
   parentFilename={selectedNarrative?.filename || ''}
   selectedExcerpt={selectedExcerpt}
   on:close={() => (isIterateOpen = false)}
+  on:start={() => { isGenerating = true; }}
+  on:finish={() => { isGenerating = false; }}
   on:done={async (e) => {
     isIterateOpen = false;
+    isGenerating = false;
     await getNarratives();
     const fname = e.detail?.filename;
     if (fname) await getNarrativeContent(fname);
@@ -346,17 +358,18 @@
     color: #111;
     line-height: 1.5;
   }
-  .narrative-render h1,
-  .narrative-render h2,
-  .narrative-render h3 { margin: 0.5rem 0; }
-  .narrative-render p { margin: 0.5rem 0; }
-  .narrative-render ul { margin: 0.5rem 1.25rem; padding-left: 1rem; }
-  .narrative-render li { margin: 0.25rem 0; }
+  :global(.narrative-render h1),
+  :global(.narrative-render h2),
+  :global(.narrative-render h3) { margin: 0.5rem 0; }
+  :global(.narrative-render p) { margin: 0.5rem 0; }
+  :global(.narrative-render ul) { margin: 0.5rem 1.25rem; padding-left: 1rem; }
+  :global(.narrative-render li) { margin: 0.25rem 0; }
 
   .content-header { position: sticky; top: 0; background: #fff; padding-bottom: .5rem; margin-bottom: .5rem; z-index: 1; }
   .content-header .filename { display: inline-block; margin: 0 .75rem .25rem 0; }
   .toolbar { display: inline-flex; gap: .5rem; flex-wrap: wrap; vertical-align: middle; }
-  .actions { display: flex; gap: .5rem; margin-top: .75rem; }
+  .loading { color:#374151; font-style: italic; }
+  /* removed unused .actions */
   .btn { border: none; padding: .4rem .7rem; border-radius: 6px; cursor: pointer; background: #e5e7eb; }
   .btn.primary { background: #3B82F6; color: white; }
   .btn.danger { background: #ef4444; color: #fff; }
