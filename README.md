@@ -205,7 +205,7 @@ Notes:
 
 ## Environment Variables
 
-Backend reads from `backend/.env` (copy from `.env.example`). Common keys:
+Backend reads from `backend/.env` (copy from `.env.example`). Compose now also loads the repo root `.env` for backend, so you can put production values there too. Common keys:
 
 - `GOOGLE_API_KEY`, `GOOGLE_API_KEY_1..3` — Gemini API keys (rotation supported)
 - `GOOGLE_MODEL` — optional model override (normalized, e.g. `gemini 2.5 flash`)
@@ -214,12 +214,12 @@ Backend reads from `backend/.env` (copy from `.env.example`). Common keys:
 - `OPENAI_TRANSCRIBE_MODEL` — default `whisper-1`
 - `OPENAI_TITLE_MODEL` — default `gpt-4o-mini`
 - `OPENAI_NARRATIVE_MODEL` — default `gpt-4o`
-- `ALLOWED_ORIGINS` — comma‑separated list of frontend origins for CORS (e.g., `https://app.example.com,https://www.example.com`)
+- `ALLOWED_ORIGINS` — comma‑separated list of frontend origins for CORS (e.g., `https://app.example.com,https://www.example.com`). Can be set in `backend/.env` or root `.env`.
 
-Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (default `http://localhost:8000`).
+Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (uses `VITE_BACKEND_URL` at build, or computes `http(s)://<current-host>:8000` at runtime if unset).
 You can set `VITE_BACKEND_URL` at build time to point the frontend at your API (e.g., `https://api.example.com`).
 
-Docker Compose passes `VITE_BACKEND_URL` as a build arg to the frontend image:
+Docker Compose passes `VITE_BACKEND_URL` as a build arg to the frontend image, and loads backend env from both `backend/.env` and root `.env`:
 
 ```yaml
 frontend:
@@ -227,6 +227,10 @@ frontend:
     context: ./frontend
     args:
       - VITE_BACKEND_URL=${VITE_BACKEND_URL:-http://localhost:8000}
+backend:
+  env_file:
+    - ./backend/.env
+    - ./.env
 ```
 Set `VITE_BACKEND_URL` in your shell before `docker compose up --build`, or in an `.env` file next to `compose.yaml`.
 
