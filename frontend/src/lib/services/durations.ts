@@ -23,7 +23,7 @@ function loadDurationFor(filename: string): Promise<number | null> {
     try {
       const audio = new Audio();
       audio.preload = 'metadata';
-      audio.src = `${BACKEND_URL}/voice_notes/${filename}`;
+      audio.src = `${BACKEND_URL}/voice_notes/${encodeURIComponent(filename)}`;
       const cleanup = () => {
         audio.onloadedmetadata = null;
         audio.onerror = null;

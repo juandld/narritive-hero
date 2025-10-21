@@ -15,7 +15,7 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 
 ## Features
 
-- Voice capture and uploads: record in-browser or upload `.wav` files
+- Voice capture and uploads: record in-browser or upload `.wav`, `.mp3`, `.ogg`, `.webm`, `.m4a`; video files like `.mkv`/`.mp4` are accepted and converted to audio automatically
 - Auto transcription and titles: Gemini 2.5 Flash via LangChain (key rotation)
 - Resilient providers: rotate multiple Gemini keys and fallback to OpenAI Whisper/Chat
 - JSON metadata per note: title, transcription, date, duration, topics, tags
@@ -24,17 +24,41 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 - Bulk actions: delete selected notes, create narratives from selection
 - Narratives: list, open, delete, assign folders; generate or iterate with formats
 
+## How It Works
+
+- Record or upload audio in the browser, or create a text-only note.
+- Frontend sends requests to the FastAPI backend (`/api/notes`, `/api/notes/text`).
+- Backend saves audio to `storage/voice_notes/` and creates/updates JSON in `storage/transcriptions/`.
+- Transcription/title run in the background: primary Gemini via LangChain (key rotation) with OpenAI fallbacks when configured.
+- Frontend fetches notes and narratives; you can group by folders, tag notes, and generate narratives from selections.
+  - Video uploads (e.g., `.mkv`) are accepted; backend extracts audio to `.wav` before processing.
+
+```mermaid
+flowchart LR
+  U[User Browser] -->|Record / Upload| FE[SvelteKit Frontend]
+  FE -->|REST / fetch| BE[FastAPI Backend]
+  BE -->|Store audio| VN[storage/voice_notes]
+  BE -->|Create / update JSON| TR[storage/transcriptions]
+  BE -->|Generate / save| NR[storage/narratives]
+  BE -->|Transcribe / Title| LC{LangChain Providers}
+  LC --> GM[(Gemini API)]
+  LC --> OA[(OpenAI API)]
+  FE <--> |List, search, actions| BE
+```
+
 ## Data & Layout
 
 - Storage (local by default):
   - `storage/voice_notes/` — uploaded/recorded audio
   - `storage/transcriptions/` — one JSON per note (metadata + text)
   - `storage/narratives/` — generated narratives (`.txt`)
+  - `storage/formats/` — saved generation formats (JSON)
+  - `storage/folders/` — folders registry (JSON)
 - Frontend dev server: `http://localhost:5173`
 - Narratives page: `http://localhost:5173/narratives`
 - Backend dev server: `http://localhost:8000`
 - Docker: frontend on `:80`, backend on `:8000`
-- Compose volumes: voice notes, transcriptions, narratives mapped to `./storage/...` on host
+- Compose volumes: voice notes, transcriptions, narratives, formats, and folders mapped to `./storage/...` on host
 
 ## Tech Stack
 
@@ -129,7 +153,7 @@ For development, you can run the frontend and backend services separately, or us
     # Option B: run directly with uvicorn
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ```
-    The helper script assumes you've already created and activated `venv`; it installs dependencies and starts the backend at `http://localhost:8000`.
+    The helper script assumes you've already created `backend/venv`; it activates it, installs dependencies, and starts the backend at `http://localhost:8000`.
 
 #### Frontend
 
@@ -170,14 +194,14 @@ This launches the Svelte dev server and the FastAPI dev server concurrently.
 - `storage/` consolidated app data
   - `storage/voice_notes/` source audio (e.g., `.wav`, `.mp3`)
   - `storage/transcriptions/` one JSON per note (see schema below)
-- `storage/narratives/` saved narratives as `.txt`
+  - `storage/narratives/` saved narratives as `.txt`
   - `storage/formats/` saved generation formats (JSON)
   - `storage/folders/` folders registry (JSON)
 - `compose.yaml` Docker Compose services
 
 Notes:
 - In Docker, the frontend is served as static files via Nginx and the browser calls the backend at `http://localhost:8000` directly (published from the backend container). No proxy is required.
-- Only `voice_notes`, `transcriptions`, and `narratives` are volume‑mapped by default. If you need `formats` and `folders` to persist across rebuilds, add volume mappings for `./storage/formats` and `./storage/folders` in `compose.yaml`.
+- All storage subfolders (`voice_notes`, `transcriptions`, `narratives`, `formats`, `folders`) are volume‑mapped by default (see `compose.yaml`).
 
 ## Environment Variables
 
@@ -190,12 +214,25 @@ Backend reads from `backend/.env` (copy from `.env.example`). Common keys:
 - `OPENAI_TRANSCRIBE_MODEL` — default `whisper-1`
 - `OPENAI_TITLE_MODEL` — default `gpt-4o-mini`
 - `OPENAI_NARRATIVE_MODEL` — default `gpt-4o`
+- `ALLOWED_ORIGINS` — comma‑separated list of frontend origins for CORS (e.g., `https://app.example.com,https://www.example.com`)
 
 Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (default `http://localhost:8000`).
+You can set `VITE_BACKEND_URL` at build time to point the frontend at your API (e.g., `https://api.example.com`).
+
+Docker Compose passes `VITE_BACKEND_URL` as a build arg to the frontend image:
+
+```yaml
+frontend:
+  build:
+    context: ./frontend
+    args:
+      - VITE_BACKEND_URL=${VITE_BACKEND_URL:-http://localhost:8000}
+```
+Set `VITE_BACKEND_URL` in your shell before `docker compose up --build`, or in an `.env` file next to `compose.yaml`.
 
 ## Note JSON Schema
 
-Each audio file `storage/voice_notes/<base>.wav` has `storage/transcriptions/<base>.json`:
+Each audio file `storage/voice_notes/<base>.<ext>` has `storage/transcriptions/<base>.json`:
 
 ```json
 {
@@ -221,7 +258,7 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
   - Primary: Gemini via LangChain (key rotation on 429/quota)
   - Fallback: LangChain OpenAI Whisper/Chat (when configured)
 - Startup backfill (non-blocking)
-  - Creates JSON for `.wav` lacking one
+  - Creates JSON for audio files lacking one
   - Does not re-transcribe if JSON exists (delete JSON to force refresh)
   - Backfills metadata (topics, tags, folder, language) into existing JSONs so sorting/filtering work consistently
 - Usage logging
@@ -243,13 +280,13 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
   - DELETE `/api/narratives/{filename}`
   - POST `/api/narratives` → body `[{"filename":"…wav"}, …]` creates concatenated narrative (simple join)
   - POST `/api/narratives/generate` → generate via LLM (auto-titles narrative and saves metadata)
+    - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
+    - Includes each note's `date` alongside its `title` and text in the prompt context.
+    - Uses Gemini (with key rotation) by default and falls back to OpenAI when `provider=auto`.
   - GET `/api/narratives/list` → list `{ filename, title?, folder }` for all narratives
   - GET `/api/narratives/thread/{filename}` → return version thread for a narrative `{ files, index }`
   - PATCH `/api/narratives/{filename}/folder` → set a folder for a narrative `{ folder }`
   - GET `/api/narratives/folders` → list narrative folders `{ name, count }`
-    - Body: `{ items: [{ filename: "…wav" }], extra_text?: string, provider?: "auto"|"gemini"|"openai", model?: string, temperature?: number, system?: string }`
-    - Includes each note's `date` alongside its `title` and text in the prompt context.
-    - Uses Gemini (with key rotation) by default and falls back to OpenAI when provider=`auto`.
 
 - Formats (optional saved prompts for generation)
   - GET `/api/formats` → list saved formats `{ id, title, prompt }`
@@ -263,6 +300,7 @@ Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files 
 
 - Static
   - `/voice_notes/{filename}` → serves uploaded audio files
+  - `/api/models` → suggest chat models `{ models: string[] }` (query: `provider=auto|gemini|openai`, `q=...`). Returns the latest big and small models per provider (auto returns both providers).
 
 Open API docs: visit `http://localhost:8000/docs`.
   
@@ -273,6 +311,7 @@ Open API docs: visit `http://localhost:8000/docs`.
 - BulkActions: bottom floating bar for Delete Selected and Create Narrative
 - NoteItem: tag chips with compact color picker, preview snippet, expand/collapse
 - Config: `frontend/src/lib/config.ts` hosts `BACKEND_URL`
+- Narrative model picker: searchable selector with live suggestions from `/api/models` (auto-updates from provider catalogs when keys are configured; shows latest big and small from each provider)
 
 Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container. Use the top bar “Narratives” to open the full narratives page.
 
@@ -282,7 +321,9 @@ Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, thi
 - Upload works but no text appears: transcription runs in the background; refresh after a moment. If it failed, try “Retry” via `POST /api/notes/{filename}/retry` or re-upload.
 - 429/quota errors: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
 - Ports busy: adjust mappings in `compose.yaml` or run dev servers on different ports.
-- Non‑WAV audio requires FFmpeg at runtime for duration detection with pydub (Docker image installs FFmpeg; for local dev, install it via your OS package manager).
+- Non‑WAV audio and video-to-audio extraction require FFmpeg at runtime (Docker image installs FFmpeg; for local dev, install it via your OS package manager).
+- CORS blocked in production: set `ALLOWED_ORIGINS` in `backend/.env` to your deployed frontend origin(s), e.g., `ALLOWED_ORIGINS=https://app.example.com`.
+- Frontend calling the wrong API host: rebuild the frontend with `VITE_BACKEND_URL` set to your API origin (e.g., `export VITE_BACKEND_URL=https://api.example.com && docker compose up --build`).
 
 ## Frontend Notes
 
@@ -332,3 +373,122 @@ Notes
 
 - Run everything
   - `bash tests/run_all.sh` runs backend tests, then frontend tests if available.
+
+## Amnesia-Friendly Shortcuts
+
+- Name vs folder: repository folder is `narritive-hero`, app name is “Narrative Hero”. Typos are intentional in folder name; don’t rename unless updating Compose, docs, and external links.
+- Local dev (fast):
+  - Terminal A: `cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
+  - Terminal B: `cd frontend && npm install && npm run dev`
+  - App: `http://localhost:5173` (API: `http://localhost:8000`)
+- All-in-one: `docker compose up --build` → open `http://localhost`
+- Force reprocess a note: delete its JSON in `storage/transcriptions/<base>.json` and refresh. Or `POST /api/notes/{filename}/retry`.
+- Can’t find audio? Files live in `storage/voice_notes/`; waveforms stream from `/voice_notes/{filename}`.
+- FFmpeg missing locally? Install via OS package manager; Docker image already includes it.
+
+## Mental Model (1-minute)
+
+- Source of truth: one JSON per note in `storage/transcriptions/` (metadata + text). Audio is optional for text-only notes.
+- Jobs: upload/record triggers background transcription + title. Gemini 2.5 Flash via LangChain with key rotation; OpenAI is a fallback.
+- UI: SvelteKit consumes REST endpoints, filters in memory, and manages tags/folders client-side while persisting via PATCH routes.
+- Narratives: plain `.txt` under `storage/narratives/` with optional metadata JSON. UI can generate/iterate via `/api/narratives/generate`.
+
+## Daily Dev Workflow
+
+- Bootstrap:
+  - Ensure `backend/.env` exists (copy from `.env.example`). At minimum set `GOOGLE_API_KEY`.
+  - Start backend and frontend (see shortcuts above).
+- Iterate:
+  - Backend change → hot reload via Uvicorn.
+  - Frontend change → Vite hot reload.
+- Test quickly:
+  - `bash tests/backend/test.sh` (uses a local venv if available, falls back to smoke tests when offline).
+  - Smoke only: `python3 tests/backend/run_smoke_tests.py`.
+
+## When Something Breaks
+
+- 401/403 from API: missing or invalid keys in `backend/.env`.
+- 429s from Gemini: keys rotate automatically; consider adding more `GOOGLE_API_KEY_1..3`. OpenAI key enables fallback.
+- CORS errors in prod: set `ALLOWED_ORIGINS` in `backend/.env` to deployed frontend origins.
+- Frontend pointed to wrong API: rebuild with `VITE_BACKEND_URL` set, or edit `frontend/src/lib/config.ts` for local dev.
+- Nothing transcribing: check logs in backend console; verify FFmpeg exists for non‑WAV/video inputs.
+
+## Extending the Backend (cheat sheet)
+
+- Add route: edit `backend/main.py` and define a FastAPI handler. Keep business logic in `services.py` and persistence in `note_store.py`.
+- Persist metadata: read/write via `note_store.save_note_json()` to keep schema consistent.
+- Use LLMs: via helpers in `providers.py` (`invoke_google`, `openai_chat`, `transcribe_with_openai`).
+- Config: add env in `backend/config.py`; document in `.env.example` and README.
+- Startup tasks: non-blocking backfill logic lives in `utils.py:on_startup()` and is invoked from `main.py`.
+
+## Extending the Frontend (cheat sheet)
+
+- API base: `frontend/src/lib/config.ts` (`BACKEND_URL` / `VITE_BACKEND_URL`).
+- Call API: add helpers in `frontend/src/lib/api.ts` or in a specific service under `frontend/src/lib/services/`.
+- UI patterns: build small components in `frontend/src/lib/components/`; wire screens in `routes/` (e.g., `routes/narratives`).
+- State: lightweight stores in `frontend/src/lib/stores/` for notes, folders, durations, etc.
+- Upload UX: Topbar handles upload/record/new text note; page-wide drag & drop handled by a `pageDrop` action.
+
+## Data Lifecycle Cheatsheet
+
+- Upload/Record → `storage/voice_notes/<base>.<ext>` created.
+- Background job → transcribe + title → `storage/transcriptions/<base>.json` created/updated with metadata (topics/tags/folder/language backfilled).
+- Delete a note → removes audio and its JSON.
+- Narrative → `.txt` saved to `storage/narratives/` (+ metadata JSON sidecar for title/folder/thread).
+- Formats → saved to `storage/formats/` and listed via `/api/formats`.
+- Folders → tracked in `storage/folders/` and in note/narrative metadata.
+
+## Env & Secrets (quick map)
+
+- Backend (`backend/.env`):
+  - `GOOGLE_API_KEY`, `GOOGLE_API_KEY_1..3` for Gemini; rotation on 429.
+  - `OPENAI_API_KEY` for fallback.
+  - Optional model overrides: `GOOGLE_MODEL`, `GOOGLE_MODEL_EXACT`, `OPENAI_*_MODEL`.
+  - `ALLOWED_ORIGINS` for CORS in prod.
+- Frontend build arg: `VITE_BACKEND_URL` (Compose passes it; browser fetches API directly).
+
+## Release/Deploy
+
+- Local Docker: `docker compose up --build` → visit `http://localhost`.
+- Config before build: set `VITE_BACKEND_URL` to public API URL if not default.
+- Persistence: host volumes map to `./storage/*` so local data survives rebuilds.
+
+## Gotchas
+
+- Folder name typo is intentional: `narritive-hero` vs app name “Narrative Hero”. Scripts and docs assume this path.
+- Text-only notes skip audio; they still get auto titles if omitted.
+- Backfill doesn’t re-transcribe existing JSONs; delete the JSON to force refresh.
+- Provider catalogs for `/api/models` are best-effort and cached briefly; exact model names can be supplied in requests if needed.
+
+## Glossary
+
+- Note: a single item with `title`, `transcription`, optional `audio`, and metadata.
+- Narrative: a `.txt` composed from notes (either concatenated or LLM-generated/iterated) with optional metadata.
+- Format: saved prompt template for narrative generation.
+- Folder: lightweight grouping for notes and narratives.
+
+## Quick File Map
+
+- Backend
+  - `backend/main.py` routes and glue
+  - `backend/services.py` core operations (transcribe/title, list, generate)
+  - `backend/note_store.py` JSON schema + persistence helpers
+  - `backend/providers.py` LLM providers and fallbacks
+  - `backend/config.py` environment and model normalization
+  - `backend/utils.py` startup tasks, async helpers
+  - `backend/usage_log.py` local usage telemetry (git-ignored outputs in `backend/usage/`)
+- Frontend
+  - `frontend/src/lib/config.ts` backend URL
+  - `frontend/src/lib/api.ts` basic API client
+  - `frontend/src/lib/components/topbar/Topbar.svelte` capture controls + view toggles
+  - `frontend/src/lib/components/NoteItem.svelte` note card with tags and audio
+  - `frontend/src/routes/narratives/+page.svelte` narratives screen
+- Orchestration
+  - `compose.yaml` services; volumes map to `./storage/*`
+  - `dev.sh` convenience launcher for both dev servers
+
+## FAQ
+
+- Why JSON instead of a database? Simplicity, portability, and easy diffing; performance is sufficient for the intended scale. Can be swapped later.
+- How to change default models? Set `GOOGLE_MODEL` for normalized name or `GOOGLE_MODEL_EXACT` for a fixed id; OpenAI models via `OPENAI_*_MODEL`.
+- Can I bring my own provider? Yes—add a provider function in `providers.py`, branch in `generate_narrative`, and update UI pickers.

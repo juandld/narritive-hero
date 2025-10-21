@@ -1,4 +1,8 @@
-export function createDragGhost(text: string, emoji = '🎵') {
+/**
+ * Creates a drag ghost element and appends it to document.body.
+ * Returns both the element and a cleanup function to remove it.
+ */
+export function createDragGhost(text: string, emoji = '🎵'): { element: HTMLDivElement; cleanup: () => void } {
   const ghost = document.createElement('div');
   ghost.style.cssText = [
     'position:fixed',
@@ -24,6 +28,5 @@ export function createDragGhost(text: string, emoji = '🎵') {
   ghost.appendChild(icon);
   ghost.appendChild(txt);
   document.body.appendChild(ghost);
-  return ghost;
+  return { element: ghost, cleanup: () => ghost.remove() };
 }
-

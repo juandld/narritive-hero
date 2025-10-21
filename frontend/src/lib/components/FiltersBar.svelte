@@ -7,8 +7,8 @@
     dateFrom: '',
     dateTo: '',
     topics: '',
-    minLen: '' as any,
-    maxLen: '' as any,
+    minLen: '',
+    maxLen: '',
     search: '',
     sortKey: 'date',
     sortDir: 'desc'
@@ -23,7 +23,7 @@
   function selectAll() { dispatch('selectAll'); }
   function clearSelection() { dispatch('clearSelection'); }
   function reset() {
-    filters = { dateFrom: '', dateTo: '', topics: '', minLen: '' as any, maxLen: '' as any, search: '', sortKey: 'date', sortDir: 'desc' };
+    filters = { dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '', sortKey: 'date', sortDir: 'desc' };
     emit();
   }
   // No reactive sync needed in runes mode
@@ -44,11 +44,11 @@
   </div>
   <div class="field">
     <label for="f-min">Min sec</label>
-    <input id="f-min" type="number" min="0" value={filters.minLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, minLen: v === '' ? '' : Number(v) as any }; emit(); }} />
+    <input id="f-min" type="number" min="0" value={filters.minLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, minLen: v === '' ? '' : Number(v) }; emit(); }} />
   </div>
   <div class="field">
     <label for="f-max">Max sec</label>
-    <input id="f-max" type="number" min="0" value={filters.maxLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, maxLen: v === '' ? '' : Number(v) as any }; emit(); }} />
+    <input id="f-max" type="number" min="0" value={filters.maxLen} oninput={(e) => { const v = (e.target as HTMLInputElement).value; filters = { ...filters, maxLen: v === '' ? '' : Number(v) }; emit(); }} />
   </div>
   <div class="field search">
     <label for="f-search">Search</label>

@@ -143,9 +143,9 @@
       e.dataTransfer?.setData('application/json', JSON.stringify(payload));
       // Custom drag image with count
       const count = filenames.length;
-      const ghost = createDragGhost(count > 1 ? `${count} notes` : `1 note`, '🎵');
+      const { element: ghost, cleanup } = createDragGhost(count > 1 ? `${count} notes` : `1 note`, '🎵');
       e.dataTransfer?.setDragImage(ghost, 24, 24);
-      setTimeout(()=>{ try{ document.body.removeChild(ghost); }catch{} }, 0);
+      setTimeout(()=>{ try{ cleanup(); }catch{} }, 0);
       document.body.classList.add('dragging-notes');
     }catch{}
   }} on:dragend={(e)=>{ setTimeout(()=>{ dragging = false; document.body.classList.remove('dragging-notes'); }, 0); }}
@@ -210,7 +210,7 @@
   </div>
   {#if hasAudio}
     <AudioPlayer
-      src={`${BACKEND_URL}/voice_notes/${note.filename}`}
+      src={`${BACKEND_URL}/voice_notes/${encodeURIComponent(note.filename)}`}
       on:play={() => (isPlaying = true)}
       on:pause={() => (isPlaying = false)}
       on:ended={() => (isPlaying = false)}

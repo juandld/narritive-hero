@@ -7,7 +7,11 @@ export const selectedNotes = writable<Set<string>>(new Set());
 
 export const notesActions = {
   async refresh() {
-    notes.set(await api.getNotes());
+    try {
+      notes.set(await api.getNotes());
+    } catch (error) {
+      console.error('Failed to refresh notes:', error);
+    }
   },
   toggleSelect(filename: string, on?: boolean) {
     selectedNotes.update((s) => {
@@ -19,4 +23,3 @@ export const notesActions = {
   },
   clearSelection() { selectedNotes.set(new Set()); },
 };
-

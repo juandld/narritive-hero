@@ -5,9 +5,28 @@
   export let ariaLabel = 'Color palette';
   export let onPick: (value: string) => void;
   function pick(v: string){ onPick && onPick(v); }
+  let container: HTMLDivElement | null = null;
+
+  function focusOptions(){
+    if (!container) return [] as HTMLButtonElement[];
+    return Array.from(container.querySelectorAll('button[role="option"]')) as HTMLButtonElement[];
+  }
+  function onKeydown(e: KeyboardEvent){
+    const opts = focusOptions();
+    if (!opts.length) return;
+    const active = (document.activeElement as HTMLElement) || null;
+    const idx = active ? opts.indexOf(active as HTMLButtonElement) : -1;
+    let next = idx;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { next = idx < 0 ? 0 : Math.min(opts.length - 1, idx + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { next = idx < 0 ? 0 : Math.max(0, idx - 1); e.preventDefault(); }
+    else if (e.key === 'Home') { next = 0; e.preventDefault(); }
+    else if (e.key === 'End') { next = opts.length - 1; e.preventDefault(); }
+    else if (e.key === 'Enter') { if (idx >= 0) { e.preventDefault(); opts[idx].click(); } }
+    if (next !== idx && next >= 0) { opts[next].focus(); }
+  }
 </script>
 
-<div class="palette" class:small={size==='small'} role="listbox" aria-label={ariaLabel}>
+<div class="palette" class:small={size==='small'} role="listbox" aria-label={ariaLabel} bind:this={container} on:keydown={onKeydown}>
   {#each colors as c}
     <button
       type="button"
@@ -17,6 +36,7 @@
       aria-label={c.label}
       role="option"
       aria-selected={selected===c.value}
+      tabindex={selected===c.value ? 0 : -1}
     ></button>
   {/each}
   <slot />
@@ -29,4 +49,3 @@
   .palette button.selected { border-color:#111; box-shadow: 0 0 0 1px #111 inset; }
   .palette button:focus-visible { outline:2px solid #111; outline-offset:2px; }
 </style>
-

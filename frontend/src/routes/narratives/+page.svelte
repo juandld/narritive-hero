@@ -74,13 +74,13 @@
 
   async function loadOne(filename: string) {
     try {
-      const r = await fetch(`${BACKEND_URL}/api/narratives/${filename}`);
+      const r = await fetch(`${BACKEND_URL}/api/narratives/${encodeURIComponent(filename)}`);
       if (r.ok) {
         const data = await r.json();
         selectedNarrative = { filename, content: data.content, title: (data as any).title };
         // thread
         try {
-          const tr = await fetch(`${BACKEND_URL}/api/narratives/thread/${filename}`);
+          const tr = await fetch(`${BACKEND_URL}/api/narratives/thread/${encodeURIComponent(filename)}`);
           thread = tr.ok ? await tr.json() : { files: [filename], index: 0 };
         } catch { thread = { files: [filename], index: 0 }; }
       }
@@ -90,7 +90,7 @@
   async function delOne(filename: string) {
     if (!confirm('Delete this narrative?')) return;
     try {
-      const r = await fetch(`${BACKEND_URL}/api/narratives/${filename}`, { method: 'DELETE' });
+      const r = await fetch(`${BACKEND_URL}/api/narratives/${encodeURIComponent(filename)}`, { method: 'DELETE' });
       if (r.ok) { selectedNarrative = null; await loadList(); }
     } catch {}
   }
@@ -153,7 +153,7 @@
     const names = Array.from(selectedSet);
     for (const fn of names) {
       try {
-        await fetch(`${BACKEND_URL}/api/narratives/${fn}/folder`, {
+        await fetch(`${BACKEND_URL}/api/narratives/${encodeURIComponent(fn)}/folder`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder })
         });
       } catch {}
@@ -168,7 +168,7 @@
     if (!confirm(`Delete ${selectedSet.size} selected narrative(s)?`)) return;
     const names = Array.from(selectedSet);
     for (const fn of names) {
-      try { await fetch(`${BACKEND_URL}/api/narratives/${fn}`, { method: 'DELETE' }); } catch {}
+      try { await fetch(`${BACKEND_URL}/api/narratives/${encodeURIComponent(fn)}`, { method: 'DELETE' }); } catch {}
     }
     clearSelection();
     await loadList();

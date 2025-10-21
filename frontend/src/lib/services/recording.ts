@@ -27,8 +27,9 @@ export async function start(onStop: (blob: Blob) => void): Promise<Recorder> {
   const chunks: BlobPart[] = [];
   mediaRecorder.ondataavailable = (event) => { if (event.data) chunks.push(event.data); };
   mediaRecorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: 'audio/wav' });
-    try { onStop(blob); } catch {}
+    const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+    try { stream.getTracks().forEach((track) => track.stop()); } catch {}
+    try { onStop(blob); } catch (e) { console.error('Error in onStop callback:', e); }
   };
   mediaRecorder.start();
   return { mediaRecorder, stream };
@@ -38,7 +39,12 @@ export function stop(rec: Recorder | MediaRecorder | null | undefined) {
   try {
     if (!rec) return;
     const mr = (rec as Recorder).mediaRecorder ? (rec as Recorder).mediaRecorder : (rec as MediaRecorder);
+    const stream = (rec as Recorder).stream;
     mr.stop();
-  } catch {}
+    if (stream) {
+      try { stream.getTracks().forEach((track) => track.stop()); } catch {}
+    }
+  } catch (e) {
+    console.error('Error stopping recorder:', e);
+  }
 }
-

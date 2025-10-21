@@ -9,9 +9,14 @@ services:
       - ./storage/voice_notes:/app/storage/voice_notes
       - ./storage/transcriptions:/app/storage/transcriptions
       - ./storage/narratives:/app/storage/narratives
+      - ./storage/formats:/app/storage/formats
+      - ./storage/folders:/app/storage/folders
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        - VITE_BACKEND_URL=${VITE_BACKEND_URL:-http://localhost:8000}
     ports:
       - "80:80"
     depends_on:

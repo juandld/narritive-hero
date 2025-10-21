@@ -15,7 +15,15 @@ export const appActions = {
     return api.deleteNote(filename);
   },
   async deleteNotes(filenames: string[]): Promise<void> {
-    await Promise.all(filenames.map((f) => api.deleteNote(f)));
+    const results = await Promise.allSettled(filenames.map((f) => api.deleteNote(f)));
+    const failures = results
+      .map((r, i) => ({ r, name: filenames[i] }))
+      .filter((x) => x.r.status === 'rejected') as { r: PromiseRejectedResult; name: string }[];
+    if (failures.length) {
+      console.error(`Failed to delete ${failures.length} of ${filenames.length} notes`, failures.map(f => ({ filename: f.name, reason: String(f.r.reason) })));
+      // Optional: throw to allow caller to surface a UI error
+      // throw new Error(`Failed to delete: ${failures.map(f=>f.name).join(', ')}`);
+    }
   },
   async moveNotesToFolder(filenames: string[], folder: string): Promise<void> {
     await Promise.all(filenames.map((f) => api.patchNoteFolder(f, folder)));
@@ -29,4 +37,3 @@ export const appActions = {
     return api.deleteFolder(name);
   },
 };
-

@@ -13,8 +13,8 @@ export const api = {
     return j<Note[]>(res);
   },
   async deleteNote(filename: string): Promise<void> {
-    const res = await fetch(`${BACKEND_URL}/api/notes/${filename}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('delete failed');
+    const res = await fetch(`${BACKEND_URL}/api/notes/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   },
   async uploadNote(fileOrBlob: File | Blob): Promise<{ filename: string }> {
     const formData = new FormData();
@@ -31,12 +31,12 @@ export const api = {
     return j<{ filename: string }>(res);
   },
   async patchNoteFolder(filename: string, folder: string): Promise<void> {
-    const res = await fetch(`${BACKEND_URL}/api/notes/${filename}/folder`, {
+    const res = await fetch(`${BACKEND_URL}/api/notes/${encodeURIComponent(filename)}/folder`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder }),
     });
-    if (!res.ok) throw new Error('patch folder failed');
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   },
 
   // Folders

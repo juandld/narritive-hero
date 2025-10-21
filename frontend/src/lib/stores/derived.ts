@@ -7,5 +7,6 @@ import { applyFilters } from '$lib/filters';
 
 export const filteredNotes = derived(
   [notes, filters, selectedFolder, computedDurations],
-  ([$notes, $filters, $selectedFolder, $durations]) => applyFilters($notes as any, $filters as any, $selectedFolder as string, $durations as Record<string, number>)
+  ([$notes, $filters, $selectedFolder, $durations]: [import('$lib/types').Note[], import('$lib/stores/filters').Filters, string, Record<string, number>]) =>
+    applyFilters($notes, $filters, $selectedFolder, $durations)
 );

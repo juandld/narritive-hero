@@ -116,7 +116,7 @@
     bind:layout
     on:startRecording={() => uiAppActions.startRecording()}
     on:stopRecording={() => uiAppActions.stopRecording()}
-    on:openNarratives={() => { try { goto('/narratives'); } catch { isNarrativesDrawerOpen = true; } }}
+    on:openNarratives={async () => { try { await goto('/narratives'); } catch { /* fallback drawer removed */ } }}
     on:openFormats={() => (isFormatsOpen = true)}
     on:openTextNote={() => (isTextNoteOpen = true)}
     on:uploadFiles={(e) => uploadsHandleFiles((e.detail as File[]) || [])}
