@@ -24,6 +24,10 @@ import json
 from datetime import datetime
 import uuid
 import asyncio
+import tempfile
+import subprocess
+import glob
+import time
 from langchain_core.messages import HumanMessage
 import providers
 import note_store as _ns
@@ -35,12 +39,12 @@ app = FastAPI()
 # Configure CORS to allow requests from the SvelteKit frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
+    allow_origins=getattr(config, "ALLOWED_ORIGINS", [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost",
         "http://127.0.0.1",
-    ],
+    ]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,23 +79,67 @@ async def create_note(
     place: str = Form(None)
 ):
     """API endpoint to upload a new note."""
+    os.makedirs(VOICE_NOTES_DIR, exist_ok=True)
+
     ct = (file.content_type or '').lower()
-    if 'webm' in ct:
-        ext = 'webm'
-    elif 'ogg' in ct:
-        ext = 'ogg'
-    elif 'm4a' in ct:
-        ext = 'm4a'
-    elif 'mp3' in ct:
-        ext = 'mp3'
+    orig_name = (file.filename or '').lower()
+    name_ext = os.path.splitext(orig_name)[1].lstrip('.')
+
+    # Detect video uploads (we only keep/extract audio)
+    is_video = False
+    if ct.startswith('video/') or name_ext in ('mkv', 'mp4', 'mov', 'avi'):
+        is_video = True
+
+    if not is_video:
+        if 'webm' in ct or name_ext == 'webm':
+            ext = 'webm'
+        elif 'ogg' in ct or name_ext == 'ogg':
+            ext = 'ogg'
+        elif 'm4a' in ct or name_ext in ('m4a', 'mp4', 'mp4a'):
+            ext = 'm4a'
+        elif 'mp3' in ct or name_ext == 'mp3':
+            ext = 'mp3'
+        else:
+            ext = 'wav'
     else:
+        # For video inputs, convert to WAV for broad compatibility
         ext = 'wav'
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{uuid.uuid4().hex[:6]}.{ext}"
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
 
-    with open(file_path, "wb") as buffer:
-        buffer.write(file.file.read())
+    if not is_video:
+        with open(file_path, "wb") as buffer:
+            buffer.write(file.file.read())
+    else:
+        # Write uploaded video to a temporary file, then extract audio to WAV
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.' + (name_ext or 'mkv')) as tmp:
+            tmp.write(file.file.read())
+            tmp_path = tmp.name
+        try:
+            # ffmpeg -y -i input -vn -ac 1 -ar 16000 output.wav
+            cmd = [
+                'ffmpeg', '-y', '-i', tmp_path,
+                '-vn', '-ac', '1', '-ar', '16000', file_path
+            ]
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as e:
+            # Clean up partial file on failure
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+            return Response(status_code=400, content=f"Failed to extract audio: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
     
     # Start transcription and title generation in the background
     print(f"File saved: {filename}. Adding transcription to background tasks.")
@@ -137,6 +185,137 @@ async def delete_note(filename: str):
         except Exception:
             pass
     return Response(status_code=200 if deleted_any else 404)
+
+_MODELS_CACHE: dict[str, tuple[float, list[str]]] = {}
+
+def _cache_set(key: str, values: list[str], ttl: float = 600.0) -> list[str]:
+    _MODELS_CACHE[key] = (time.time() + ttl, values)
+    return values
+
+def _cache_get(key: str) -> list[str] | None:
+    exp_vals = _MODELS_CACHE.get(key)
+    if not exp_vals:
+        return None
+    exp, vals = exp_vals
+    if time.time() > exp:
+        _MODELS_CACHE.pop(key, None)
+        return None
+    return vals
+
+def _list_openai_latest() -> list[str]:
+    cached = _cache_get("openai")
+    if cached is not None:
+        return cached
+    ids: list[str] = []
+    try:
+        from openai import OpenAI
+        if not getattr(config, 'OPENAI_API_KEY', None):
+            raise RuntimeError('no openai key')
+        client = OpenAI(api_key=config.OPENAI_API_KEY)
+        # Some servers paginate; keep it simple
+        resp = client.models.list()
+        all_ids = [getattr(m, 'id', None) or (m.get('id') if isinstance(m, dict) else None) for m in getattr(resp, 'data', [])]
+        all_ids = [str(x) for x in all_ids if x]
+        # Choose latest big (pro) and small (mini)
+        prefer_pro = ["gpt-4.1", "gpt-4o"]
+        prefer_mini = ["gpt-4.1-mini", "gpt-4o-mini"]
+        lower_set = {str(x).lower() for x in all_ids}
+        picks: list[str] = []
+        for p in prefer_pro:
+            if p.lower() in lower_set:
+                picks.append(p); break
+        for p in prefer_mini:
+            if p.lower() in lower_set:
+                # avoid duplicate if names collide
+                if not picks or picks[-1].lower() != p.lower():
+                    picks.append(p)
+                break
+        if not picks:
+            # Reasonable defaults if list empty
+            picks = [getattr(config, "OPENAI_NARRATIVE_MODEL", "gpt-4o"), "gpt-4.1-mini"]
+        ids = picks
+    except Exception:
+        # Fallback to minimal curated list (pro + mini)
+        ids = [getattr(config, "OPENAI_NARRATIVE_MODEL", "gpt-4o"), "gpt-4.1-mini"]
+    # Dedup while preserving order
+    seen: set[str] = set(); out: list[str] = []
+    for x in ids:
+        if x and x not in seen:
+            seen.add(x); out.append(x)
+    return _cache_set("openai", out)
+
+def _list_gemini_latest() -> list[str]:
+    cached = _cache_get("gemini")
+    if cached is not None:
+        return cached
+    ids: list[str] = []
+    try:
+        # Prefer google-generativeai if available for catalog listing
+        import google.generativeai as genai
+        if not config.collect_google_api_keys():
+            raise RuntimeError('no gemini key')
+        genai.configure(api_key=config.collect_google_api_keys()[0])
+        models = list(genai.list_models())
+        avail: set[str] = set()
+        for m in models:
+            mid = getattr(m, 'name', '') or getattr(m, 'model', '') or ''
+            s = str(mid).split('/')[-1].lower()  # some return full resource names
+            if s.startswith('gemini-'):
+                avail.add(s)
+        # Prefer latest big (pro) and small (flash)
+        prefer_pro = ["gemini-2.5-pro-latest", "gemini-2.5-pro", "gemini-2-pro", "gemini-2-latest"]
+        prefer_flash = ["gemini-2.5-flash-latest", "gemini-2.5-flash", "gemini-2-flash", "gemini-2-latest"]
+        picks: list[str] = []
+        for p in prefer_pro:
+            if p in avail:
+                picks.append(p); break
+        for p in prefer_flash:
+            if p in avail:
+                if not picks or picks[-1] != p:
+                    picks.append(p)
+                break
+        if not picks:
+            picks = [getattr(config, "GOOGLE_MODEL", "gemini-2.5-flash"), "gemini-2.5-pro"]
+        ids = picks
+    except Exception:
+        # Fallback to curated list emphasizing latest/pro
+        ids = [getattr(config, "GOOGLE_MODEL", "gemini-2.5-flash"), "gemini-2.5-pro"]
+    # Dedup + prefer -latest, then numeric desc, then pro before flash
+    def sort_key(x: str):
+        xl = x.lower()
+        latest = xl.endswith('-latest')
+        pro = '-pro' in xl
+        # crude numeric extraction for 2.5, 2.0, 3.0 etc.
+        import re
+        m = re.search(r'gemini-(\d+(?:\.\d+)?)', xl)
+        ver = float(m.group(1)) if m else 0.0
+        return (0 if latest else 1, -ver, 0 if pro else 1, xl)
+    # Keep at most 2 (pro + flash)
+    seen: set[str] = set(); out = []
+    for it in sorted(ids, key=sort_key):
+        if it not in seen:
+            seen.add(it); out.append(it)
+        if len(out) >= 2:
+            break
+    return _cache_set("gemini", out)
+
+@app.get("/api/models")
+async def list_models(provider: str = "auto", q: str = ""):
+    prov = (provider or "auto").lower()
+    query = (q or "").strip().lower()
+    models: list[str]
+    if prov == 'gemini':
+        models = _list_gemini_latest()
+    elif prov == 'openai':
+        models = _list_openai_latest()
+    else:
+        # Merge top picks only (1 per provider)
+        g = _list_gemini_latest()
+        o = _list_openai_latest()
+        models = g + o
+    if query:
+        models = [m for m in models if query in m.lower()]
+    return {"models": models}
 
 @app.post("/api/notes/text")
 async def create_text_note(request: Request):

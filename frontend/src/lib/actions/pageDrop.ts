@@ -5,14 +5,18 @@ export type PageDropOptions = {
 };
 
 function defaultAccept(f: File): boolean {
-  return (f.type && f.type.startsWith('audio/')) || /\.(wav|mp3|ogg|m4a|webm)$/i.test(f.name);
+  if (f.type) {
+    if (f.type.startsWith('audio/')) return true;
+    if (f.type.startsWith('video/')) return true; // allow video; backend extracts audio
+  }
+  return /\.(wav|mp3|ogg|m4a|webm|mkv|mp4|mov)$/i.test(f.name);
 }
 
 export function pageDrop(node: HTMLElement, options: PageDropOptions) {
   let depth = 0;
   let overlay: HTMLDivElement | null = null;
   const accept = options.accept || defaultAccept;
-  const text = options.overlayText || 'Drop audio files to upload';
+  const text = options.overlayText || 'Drop audio/video files to upload';
 
   function hasFiles(e: DragEvent): boolean {
     return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
@@ -69,7 +73,11 @@ export function pageDrop(node: HTMLElement, options: PageDropOptions) {
     hideOverlay();
     const dt = e.dataTransfer;
     if (!dt) return;
-    const files = Array.from(dt.files || []).filter((f) => (accept instanceof RegExp ? accept.test(f.name) : accept(f)));
+    const files = Array.from(dt.files || []).filter((f) => (
+      accept instanceof RegExp
+        ? accept.test(f.name) || (!!f.type && accept.test(f.type))
+        : accept(f)
+    ));
     if (files.length) options.onFiles(files);
   }
 
@@ -88,4 +96,3 @@ export function pageDrop(node: HTMLElement, options: PageDropOptions) {
     },
   };
 }
-

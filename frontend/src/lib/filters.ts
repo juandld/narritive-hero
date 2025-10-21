@@ -71,6 +71,10 @@ export function applyFilters(
   const key = filters.sortKey || 'date';
   const getLenRaw = (n: Note): number | null => {
     if (typeof n.length_seconds === 'number' && Number.isFinite(n.length_seconds)) return n.length_seconds as number;
+    if (typeof (n as any).length_seconds === 'string') {
+      const parsed = Number((n as any).length_seconds);
+      if (Number.isFinite(parsed)) return parsed;
+    }
     const d = computedDurations[n.filename];
     return typeof d === 'number' && Number.isFinite(d) ? d : null;
   };

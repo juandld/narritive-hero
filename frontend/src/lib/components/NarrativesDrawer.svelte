@@ -39,12 +39,12 @@
 
   async function getNarrativeContent(filename: string) {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives/${filename}`);
+      const response = await fetch(`${BACKEND_URL}/api/narratives/${encodeURIComponent(filename)}`);
       if (response.ok) {
         const data = await response.json();
         selectedNarrative = { filename, content: data.content, title: (data as any).title } as any;
         try {
-          const tr = await fetch(`${BACKEND_URL}/api/narratives/thread/${filename}`);
+          const tr = await fetch(`${BACKEND_URL}/api/narratives/thread/${encodeURIComponent(filename)}`);
           if (tr.ok) {
             thread = await tr.json();
           } else {
@@ -63,7 +63,7 @@
 
   async function deleteNarrative(filename: string) {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives/${filename}`, {
+      const response = await fetch(`${BACKEND_URL}/api/narratives/${encodeURIComponent(filename)}`, {
         method: 'DELETE'
       });
       if (response.ok) {

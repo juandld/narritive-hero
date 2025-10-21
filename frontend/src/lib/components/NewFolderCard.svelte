@@ -33,7 +33,9 @@
       if (!n || !filenames.length) return;
       dispatch('createAndMove', { name: n, filenames });
       name = '';
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to parse drop data:', err);
+    }
   }
 </script>
 
@@ -58,4 +60,3 @@
   button { padding:.35rem .6rem; border:1px solid #e5e7eb; background:#f3f4f6; border-radius:6px; cursor:pointer; }
   .hint { color:#6b7280; }
 </style>
-

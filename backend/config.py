@@ -61,3 +61,16 @@ def collect_google_api_keys() -> list[str]:
         if val and val not in keys:
             keys.append(val)
     return keys
+
+# Allowed frontend origins for CORS in production. Comma‑separated list.
+_ALLOWED = os.getenv("ALLOWED_ORIGINS", "").strip()
+if _ALLOWED:
+    ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED.split(",") if o.strip()]
+else:
+    # Sensible defaults for local dev
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]

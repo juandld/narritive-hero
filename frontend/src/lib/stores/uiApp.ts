@@ -12,6 +12,10 @@ let recorder: Rec | null = null;
 
 export const uiAppActions = {
   async startRecording() {
+    if (recorder !== null) {
+      console.warn('Recording already in progress');
+      return;
+    }
     try {
       const needsPlace = getVal(includePlace);
       if (needsPlace) {
@@ -21,13 +25,22 @@ export const uiAppActions = {
           showPlacePrompt.set(true);
         } catch {}
       }
-      recorder = await recStart(async (blob) => { await uploadsUploadBlob(blob); });
+      recorder = await recStart(async (blob) => {
+        try {
+          await uploadsUploadBlob(blob);
+        } catch (error) {
+          console.error('Failed to upload blob:', error);
+        }
+      });
       isRecording.set(true);
-    } catch {}
+    } catch (e) {
+      console.error('Failed to start recording:', e);
+    }
   },
   stopRecording() {
-    try { recStop(recorder); } catch {}
+    try { recStop(recorder); } catch (e) { console.error('Failed to stop recording:', e); }
     isRecording.set(false);
+    recorder = null;
   },
   setIncludePlace(val: boolean){ includePlace.set(val); },
   setIncludeDate(val: boolean){ includeDate.set(val); },
@@ -36,4 +49,3 @@ export const uiAppActions = {
 function getVal<T>(store: { subscribe: (run: (v: T)=>void) => any }): T {
   let v!: T; const unsub = store.subscribe((x)=> v = x); unsub && (unsub as any)(); return v;
 }
-

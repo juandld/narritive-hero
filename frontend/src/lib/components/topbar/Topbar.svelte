@@ -20,7 +20,7 @@
 <div class="topbar">
   <div class="row">
     <div class="actions" style="margin-left:auto">
-      <input id="toolbar-upload" type="file" accept="audio/*" multiple style="display:none" on:change={triggerUpload} />
+      <input id="toolbar-upload" type="file" accept="audio/*,video/*" multiple style="display:none" on:change={triggerUpload} />
       <button class="btn" on:click={() => (document.getElementById('toolbar-upload') as HTMLInputElement)?.click()}>Upload</button>
       <button class="btn" on:click={() => dispatch('openTextNote')}>New Text Note</button>
       <button class="btn" on:click={() => dispatch('openNarratives')}>Narratives</button>

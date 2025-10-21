@@ -1,8 +1,7 @@
-export async function onCopy(e: CustomEvent<string>) {
+export async function onCopy(e?: CustomEvent<string>) {
   try {
-    const text = (e && (e as any).detail) || '';
+    const text = e?.detail || '';
     if (!text) return;
     await navigator.clipboard.writeText(text);
   } catch {}
 }
-
