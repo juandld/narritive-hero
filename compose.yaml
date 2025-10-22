@@ -4,21 +4,23 @@ services:
     env_file:
       - ./backend/.env
       - ./.env
+    environment:
+      # Ensure backend writes to the bind mount inside the container
+      - STORAGE_DIR=/app/storage
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ./storage/voice_notes:/app/storage/voice_notes
-      - ./storage/transcriptions:/app/storage/transcriptions
-      - ./storage/narratives:/app/storage/narratives
-      - ./storage/formats:/app/storage/formats
-      - ./storage/folders:/app/storage/folders
+      # Bind mount the entire storage directory. Set STORAGE_DIR to an absolute path on your VPS for durability,
+      # e.g., STORAGE_DIR=/var/lib/narrative-hero (falls back to ./storage when unset)
+      - ${STORAGE_DIR:-./storage}:/app/storage
 
   frontend:
     build:
       context: ./frontend
       args:
-        - VITE_BACKEND_URL=${VITE_BACKEND_URL:-http://localhost:8000}
+        # Pass through if set; leave empty to enable same-origin fallback (port 80/443)
+        - VITE_BACKEND_URL=${VITE_BACKEND_URL:-}
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - backend

@@ -123,6 +123,8 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
     audio_path = os.path.join(config.VOICE_NOTES_DIR, audio_filename)
     mtime = os.path.getmtime(audio_path) if os.path.exists(audio_path) else None
     date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d') if mtime else None
+    created_ts = int(mtime * 1000) if mtime else int(datetime.now().timestamp() * 1000)
+    created_at = datetime.fromtimestamp(mtime).isoformat() if mtime else datetime.now().isoformat()
     length_sec = audio_length_seconds(audio_path) if mtime else None
     topics = infer_topics(transcription, title)
     language = infer_language(transcription, title)
@@ -131,6 +133,8 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
         "title": title,
         "transcription": transcription,
         "date": date_str,
+        "created_at": created_at,
+        "created_ts": created_ts,
         "length_seconds": length_sec,
         "topics": topics,
         "language": language,
@@ -183,6 +187,15 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
             mtime = os.path.getmtime(audio_path)
             data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
             updated = True
+        # Ensure created_at/created_ts from audio mtime if missing
+        if not data.get("created_ts") or not isinstance(data.get("created_ts"), (int, float)):
+            try:
+                mtime = os.path.getmtime(audio_path)
+                data["created_ts"] = int(mtime * 1000)
+                data["created_at"] = datetime.fromtimestamp(mtime).isoformat()
+                updated = True
+            except Exception:
+                pass
         if data.get("length_seconds") is None:
             data["length_seconds"] = audio_length_seconds(audio_path)
             updated = True
@@ -191,6 +204,15 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
         try:
             mtime = os.path.getmtime(jp)
             data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+            updated = True
+        except Exception:
+            pass
+    # If created ts/at missing and we have JSON mtime, set from it
+    if (not data.get("created_ts") or not isinstance(data.get("created_ts"), (int, float))) and os.path.exists(jp):
+        try:
+            mtime = os.path.getmtime(jp)
+            data["created_ts"] = int(mtime * 1000)
+            data["created_at"] = datetime.fromtimestamp(mtime).isoformat()
             updated = True
         except Exception:
             pass

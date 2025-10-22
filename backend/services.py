@@ -159,6 +159,16 @@ async def transcribe_and_save(wav_path):
         print(f"Successfully generated title for {base_filename}.")
 
         payload = note_store.build_note_payload(base_filename, title_text, transcribed_text)
+        # Preserve user metadata (e.g., folder, tags) if a JSON was created earlier
+        try:
+            existing, _, _ = note_store.load_note_json(os.path.splitext(base_filename)[0])
+            if isinstance(existing, dict):
+                if 'folder' in existing and (existing.get('folder') or '').strip() != '':
+                    payload['folder'] = existing.get('folder')
+                if 'tags' in existing and isinstance(existing.get('tags'), list):
+                    payload['tags'] = existing.get('tags')
+        except Exception:
+            pass
         note_store.save_note_json(os.path.splitext(base_filename)[0], payload)
         print(f"Successfully saved transcription and title for {base_filename}.")
 
@@ -166,6 +176,15 @@ async def transcribe_and_save(wav_path):
         print(f"Error during transcription/titling for {wav_path}: {e}")
         if os.path.exists(wav_path):
             payload = note_store.build_note_payload(base_filename, "Title generation failed.", "Transcription failed.")
+            try:
+                existing, _, _ = note_store.load_note_json(os.path.splitext(base_filename)[0])
+                if isinstance(existing, dict):
+                    if 'folder' in existing and (existing.get('folder') or '').strip() != '':
+                        payload['folder'] = existing.get('folder')
+                    if 'tags' in existing and isinstance(existing.get('tags'), list):
+                        payload['tags'] = existing.get('tags')
+            except Exception:
+                pass
             note_store.save_note_json(os.path.splitext(base_filename)[0], payload)
 
 # Removed unused helpers and scenario-related functions to reduce complexity
@@ -203,6 +222,8 @@ def get_notes():
                 "transcription": transcription,  # likely None
                 "title": (title or base_filename),
                 "date": date_str,
+                "created_at": __import__('datetime').datetime.fromtimestamp(mtime).isoformat(),
+                "created_ts": int(mtime * 1000),
                 "length_seconds": length_sec,
                 "topics": [],
                 "folder": "",
@@ -221,6 +242,8 @@ def get_notes():
             "transcription": transcription,
             "title": _title,
             "date": data.get("date"),
+            "created_at": data.get("created_at"),
+            "created_ts": data.get("created_ts"),
             "length_seconds": data.get("length_seconds"),
             "topics": data.get("topics", []),
             "language": data.get("language", "und"),
@@ -252,6 +275,8 @@ def get_notes():
                 "transcription": data.get("transcription"),
                 "title": _title2,
                 "date": data.get("date"),
+                "created_at": data.get("created_at"),
+                "created_ts": data.get("created_ts"),
                 "length_seconds": data.get("length_seconds"),
                 "topics": data.get("topics", []),
                 "language": data.get("language", "und"),

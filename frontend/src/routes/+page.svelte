@@ -1,3 +1,4 @@
+<svelte:options runes={true} />
 <script lang="ts">
   import { onMount } from 'svelte';
   import Toast from '../lib/components/Toast.svelte';
@@ -51,10 +52,13 @@
   import { filters as filtersStore } from '$lib/stores/filters';
   import { computedDurations as durationsStore } from '$lib/stores/durations';
   import { applyFilters } from '$lib/filters';
+  import { dbg } from '$lib/debug';
   let filters: Filters = $state({ dateFrom: '', dateTo: '', topics: '', minLen: '', maxLen: '', search: '', sortKey: 'date', sortDir: 'desc' });
   // Keep global filters store in sync (optional)
   $effect(() => { try { filtersStore.set(filters); } catch {} });
   const filteredNotes = $derived(applyFilters($notesStore as any, filters as any, $selectedFolderStore as string, $durationsStore as any));
+  $effect(() => { try { dbg('Page:filters', filters); } catch {} });
+  $effect(() => { try { dbg('Page:order:first10', (filteredNotes || []).slice(0, 10).map(n => n.filename)); } catch {} });
   let layout = $state<'list' | 'compact' | 'grid3'>('list');
   // Client-side duration cache (store holds the map)
   // durations are computed and stored via pageActions.refreshAll()

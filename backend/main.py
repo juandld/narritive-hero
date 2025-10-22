@@ -76,7 +76,8 @@ async def create_note(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     date: str = Form(None),
-    place: str = Form(None)
+    place: str = Form(None),
+    folder: str = Form(None)
 ):
     """API endpoint to upload a new note."""
     os.makedirs(VOICE_NOTES_DIR, exist_ok=True)
@@ -141,6 +142,20 @@ async def create_note(
             except Exception:
                 pass
     
+    # If a folder is provided, create or update a minimal JSON immediately so
+    # the note appears under the selected folder before transcription completes.
+    try:
+        base_filename = os.path.splitext(filename)[0]
+        import note_store as _ns
+        # Minimal payload: use base as a placeholder title, empty transcription
+        payload_min = _ns.build_note_payload(filename, base_filename, "")
+        if folder:
+            payload_min["folder"] = (folder or "").strip()
+        _ns.save_note_json(base_filename, payload_min)
+    except Exception:
+        # Non-fatal; background task will create JSON later
+        pass
+
     # Start transcription and title generation in the background
     print(f"File saved: {filename}. Adding transcription to background tasks.")
     background_tasks.add_task(transcribe_and_save, file_path)
@@ -367,11 +382,14 @@ async def create_text_note(request: Request):
                     title = ' '.join(words[:8]) if words else 'Text Note'
 
         # Build payload similar to build_note_payload but without audio metadata
+        now = datetime.now()
         data = {
             "filename": pseudo_filename,
             "title": (title or '').strip() or 'Text Note',
             "transcription": transcription,
             "date": date_override or datetime.now().strftime('%Y-%m-%d'),
+            "created_at": now.isoformat(),
+            "created_ts": int(now.timestamp() * 1000),
             "length_seconds": None,
             "topics": _note_store.infer_topics(transcription, title or None),
             "language": _note_store.infer_language(transcription, title or None),

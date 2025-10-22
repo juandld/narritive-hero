@@ -1,6 +1,7 @@
 import { appActions } from '$lib/services/appActions';
 import { notes as notesStore } from '$lib/stores/notes';
-import { folders as foldersStore } from '$lib/stores/folders';
+import { folders as foldersStore, selectedFolder as selectedFolderStore } from '$lib/stores/folders';
+import { dbg } from '$lib/debug';
 
 async function refreshAll() {
   const { notes, folders } = await appActions.fetchNotesAndFolders();
@@ -8,8 +9,17 @@ async function refreshAll() {
   foldersStore.set(folders);
 }
 
+function getSelectedFolder(): string | undefined {
+  let v: string = '__ALL__';
+  try { const unsub = selectedFolderStore.subscribe((x) => (v = x as any)); if (typeof unsub === 'function') (unsub as any)(); } catch {}
+  if (v && v !== '__ALL__' && v !== '__UNFILED__') return v;
+  return undefined;
+}
+
 export async function uploadBlob(blob: Blob, skipPoll = false) {
-  const { filename } = await appActions.uploadNote(blob);
+  const folder = getSelectedFolder();
+  dbg('uploads:uploadBlob', { folder });
+  const { filename } = await appActions.uploadNote(blob as any, folder);
   if (skipPoll) {
     await refreshAll();
     return;
@@ -42,4 +52,3 @@ export async function handleFiles(files: File[]) {
   };
   setTimeout(loop, 0);
 }
-

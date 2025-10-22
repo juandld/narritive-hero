@@ -12,6 +12,7 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 - Docker (all-in-one): `docker compose up --build` then open `http://localhost` (backend at `http://localhost:8000`).
 - Add notes: click Upload (Topbar), drag & drop audio anywhere, use Start Recording, or click New Text Note to paste an existing transcript.
 - Expand/collapse text: click the ▼/▲ toggle within a note card. You can also switch views (List/Compact/Grid) from the Topbar.
+- API docs: FastAPI Swagger UI is available at `http://localhost:8000/docs`.
 
 ## Features
 
@@ -58,7 +59,10 @@ flowchart LR
 - Narratives page: `http://localhost:5173/narratives`
 - Backend dev server: `http://localhost:8000`
 - Docker: frontend on `:80`, backend on `:8000`
-- Compose volumes: voice notes, transcriptions, narratives, formats, and folders mapped to `./storage/...` on host
+- Compose volumes: entire `/app/storage` bind‑mounted from host. Set `STORAGE_DIR` to an absolute
+  path on your VPS (recommended) or let it default to `./storage` in the repo.
+  - Example: `export STORAGE_DIR=/var/lib/narrative-hero && docker compose up --build`
+  - Data lives under `$STORAGE_DIR` and persists across pulls/rebuilds
 
 ## Tech Stack
 
@@ -69,9 +73,16 @@ flowchart LR
 ## Prerequisites
 
 - Docker and Docker Compose (optional)
-- Node.js and npm (frontend)
+- Node.js 18+ and npm (frontend)
 - Python 3.10+ and pip (backend)
 - API keys: Google AI (Gemini). Optional: OpenAI (fallbacks)
+- FFmpeg for local dev if you plan to upload non‑WAV audio or video files (Docker image already includes it)
+
+Install FFmpeg locally (examples):
+
+- macOS (Homebrew): `brew install ffmpeg`
+- Ubuntu/Debian: `sudo apt-get update && sudo apt-get install -y ffmpeg`
+- Windows (Chocolatey): `choco install ffmpeg`
 
 ## Running the Project
 
@@ -155,6 +166,10 @@ For development, you can run the frontend and backend services separately, or us
     ```
     The helper script assumes you've already created `backend/venv`; it activates it, installs dependencies, and starts the backend at `http://localhost:8000`.
 
+Windows tips:
+- Creating a venv: `py -3 -m venv venv && venv\\Scripts\\activate`
+- Running Uvicorn: `uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
+
 #### Frontend
 
 1.  **Navigate to the frontend directory:**
@@ -234,6 +249,11 @@ backend:
 ```
 Set `VITE_BACKEND_URL` in your shell before `docker compose up --build`, or in an `.env` file next to `compose.yaml`.
 
+Security note:
+- This app has no authentication out of the box. For production use, deploy the backend behind an authenticated proxy or add auth at the API level.
+- Always set `ALLOWED_ORIGINS` to your frontend origin(s) in production to avoid permissive CORS.
+- Keep `./storage/*` volumes private; they contain your recordings, transcripts, and generated narratives.
+
 ## Note JSON Schema
 
 Each audio file `storage/voice_notes/<base>.<ext>` has `storage/transcriptions/<base>.json`:
@@ -244,6 +264,8 @@ Each audio file `storage/voice_notes/<base>.<ext>` has `storage/transcriptions/<
   "title": "Quick standup notes",
   "transcription": "We discussed…",
   "date": "2025-09-23",
+  "created_at": "2025-09-23T14:01:54.123456",
+  "created_ts": 1758636114123,
   "length_seconds": 42.5,
   "topics": ["standup", "team", "progress"],
   "language": "en",
@@ -253,6 +275,8 @@ Each audio file `storage/voice_notes/<base>.<ext>` has `storage/transcriptions/<
 ```
 
 Only JSON files are considered for existing notes. Legacy `.txt`/`.title` files are ignored.
+
+Sorting notes: the UI sorts by most recent using `created_ts`/`created_at` when present, with `date` as a fallback. New and backfilled notes include these precise timestamps automatically (derived from audio file mtime or JSON mtime).
 
 <!-- duplicate Testing section removed; consolidated below -->
 
@@ -416,6 +440,7 @@ Notes
 - CORS errors in prod: set `ALLOWED_ORIGINS` in `backend/.env` to deployed frontend origins.
 - Frontend pointed to wrong API: rebuild with `VITE_BACKEND_URL` set, or edit `frontend/src/lib/config.ts` for local dev.
 - Nothing transcribing: check logs in backend console; verify FFmpeg exists for non‑WAV/video inputs.
+- Windows + WSL path issues: ensure your `./storage/*` directories are on the Linux filesystem, not a mounted Windows drive, to avoid permission quirks.
 
 ## Extending the Backend (cheat sheet)
 
@@ -456,6 +481,7 @@ Notes
 - Local Docker: `docker compose up --build` → visit `http://localhost`.
 - Config before build: set `VITE_BACKEND_URL` to public API URL if not default.
 - Persistence: host volumes map to `./storage/*` so local data survives rebuilds.
+- Static frontend: the Dockerized frontend builds to static assets served by Nginx (see `frontend/nginx.conf`). The browser talks directly to the backend at `:8000`.
 
 ## Gotchas
 
@@ -496,3 +522,10 @@ Notes
 - Why JSON instead of a database? Simplicity, portability, and easy diffing; performance is sufficient for the intended scale. Can be swapped later.
 - How to change default models? Set `GOOGLE_MODEL` for normalized name or `GOOGLE_MODEL_EXACT` for a fixed id; OpenAI models via `OPENAI_*_MODEL`.
 - Can I bring my own provider? Yes—add a provider function in `providers.py`, branch in `generate_narrative`, and update UI pickers.
+
+## Contributing
+
+- Fork and clone the repo. The folder name is intentionally `narritive-hero`.
+- For local dev, run the backend and frontend as described in Quick Start.
+- Run backend tests: `bash tests/backend/test.sh` (falls back to smoke tests if pytest isn’t available).
+- Open a PR with a clear description of the change and any user‑visible effects.
