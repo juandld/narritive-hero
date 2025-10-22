@@ -26,7 +26,7 @@
   }
 </script>
 
-<div class="palette" class:small={size==='small'} role="listbox" aria-label={ariaLabel} bind:this={container} on:keydown={onKeydown}>
+<div class="palette" class:small={size==='small'} role="listbox" aria-label={ariaLabel} bind:this={container} on:keydown={onKeydown} tabindex="0">
   {#each colors as c}
     <button
       type="button"

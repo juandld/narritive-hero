@@ -11,10 +11,22 @@ from dotenv import load_dotenv
 # Load environment variables early
 load_dotenv()
 
-# Base application directories
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# Consolidate storage under a single folder
-STORAGE_DIR = os.path.join(BASE_DIR, "storage")
+# Resolve storage directory robustly across dev (repo layout) and container (single-dir app)
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 1) Allow explicit override via env
+_STORAGE_DIR_ENV = os.getenv("STORAGE_DIR")
+if _STORAGE_DIR_ENV and _STORAGE_DIR_ENV.strip():
+    STORAGE_DIR = os.path.abspath(_STORAGE_DIR_ENV.strip())
+else:
+    # 2) Prefer ./storage next to this file (container layout: /app/storage)
+    _cand1 = os.path.join(THIS_DIR, "storage")
+    # 3) Fallback: ../storage (repo layout: <repo>/storage)
+    _cand2 = os.path.join(os.path.dirname(THIS_DIR), "storage")
+    if os.path.isdir(_cand1) or not os.path.isdir(_cand2):
+        STORAGE_DIR = _cand1
+    else:
+        STORAGE_DIR = _cand2
 VOICE_NOTES_DIR = os.path.join(STORAGE_DIR, "voice_notes")
 TRANSCRIPTS_DIR = os.path.join(STORAGE_DIR, "transcriptions")
 NARRATIVES_DIR = os.path.join(STORAGE_DIR, "narratives")
@@ -62,15 +74,36 @@ def collect_google_api_keys() -> list[str]:
             keys.append(val)
     return keys
 
-# Allowed frontend origins for CORS in production. Comma‑separated list.
-_ALLOWED = os.getenv("ALLOWED_ORIGINS", "").strip()
-if _ALLOWED:
-    ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED.split(",") if o.strip()]
-else:
-    # Sensible defaults for local dev
-    ALLOWED_ORIGINS = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost",
-        "http://127.0.0.1",
-    ]
+def _collect_allowed_origins() -> list[str]:
+    """Collect CORS origins from env.
+
+    Priority:
+    1) Per-origin variables: ALLOWED_ORIGIN, ALLOWED_ORIGIN_1..N
+    2) Backward-compat: ALLOWED_ORIGINS (comma-separated)
+    3) Local dev defaults
+    """
+    origins: list[str] = []
+    # 1) Per-origin variables (order by name for consistency)
+    keys = [k for k in os.environ.keys() if k == "ALLOWED_ORIGIN" or k.startswith("ALLOWED_ORIGIN_")]
+    for key in sorted(keys):
+        val = os.getenv(key, "").strip()
+        if val and val not in origins:
+            origins.append(val)
+    if origins:
+        return origins
+
+    # 2) Backward-compat comma-separated
+    csv = os.getenv("ALLOWED_ORIGINS", "").strip()
+    if csv:
+        return [o.strip() for o in csv.split(",") if o.strip()]
+
+    # 3) Sensible defaults for local dev (support a few common Vite ports)
+    ports = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180]
+    origins = []
+    for p in ports:
+        origins.append(f"http://localhost:{p}")
+        origins.append(f"http://127.0.0.1:{p}")
+    return origins
+
+# Allowed frontend origins for CORS
+ALLOWED_ORIGINS = _collect_allowed_origins()

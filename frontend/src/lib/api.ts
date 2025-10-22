@@ -1,4 +1,5 @@
 import { BACKEND_URL } from './config';
+import { dbg } from '$lib/debug';
 import type { Note, FolderInfo } from './types';
 
 async function j<T>(res: Response): Promise<T> {
@@ -10,15 +11,20 @@ export const api = {
   // Notes
   async getNotes(): Promise<Note[]> {
     const res = await fetch(`${BACKEND_URL}/api/notes`);
-    return j<Note[]>(res);
+    const data = await j<Note[]>(res);
+    dbg('api:getNotes', Array.isArray(data) ? data.length : 'n/a');
+    return data;
   },
   async deleteNote(filename: string): Promise<void> {
     const res = await fetch(`${BACKEND_URL}/api/notes/${encodeURIComponent(filename)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   },
-  async uploadNote(fileOrBlob: File | Blob): Promise<{ filename: string }> {
+  async uploadNote(fileOrBlob: File | Blob, folder?: string): Promise<{ filename: string }> {
     const formData = new FormData();
     formData.append('file', fileOrBlob, (fileOrBlob as File).name || 'recording.wav');
+    if (folder && folder !== '__ALL__' && folder !== '__UNFILED__') {
+      formData.append('folder', folder);
+    }
     const res = await fetch(`${BACKEND_URL}/api/notes`, { method: 'POST', body: formData });
     return j<{ filename: string }>(res);
   },

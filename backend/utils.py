@@ -13,7 +13,6 @@ from langchain_core.messages import HumanMessage
 import config
 
 # Centralized paths; keep module vars for monkeypatching in tests
-APP_DIR = config.BASE_DIR
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 
@@ -26,9 +25,9 @@ async def on_startup():
     # Ensure narratives dir exists under storage
     try:
         import config as _cfg
-        NARRATIVES_DIR = getattr(_cfg, "NARRATIVES_DIR", os.path.join(APP_DIR, "storage", "narratives"))
+        NARRATIVES_DIR = getattr(_cfg, "NARRATIVES_DIR", os.path.join(_cfg.STORAGE_DIR, "narratives"))
     except Exception:
-        NARRATIVES_DIR = os.path.join(APP_DIR, "storage", "narratives")
+        NARRATIVES_DIR = os.path.join(config.STORAGE_DIR, "narratives")
     if not os.path.exists(NARRATIVES_DIR):
         os.makedirs(NARRATIVES_DIR)
     # Ensure formats dir exists

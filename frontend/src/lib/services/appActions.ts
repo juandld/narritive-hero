@@ -8,8 +8,8 @@ export const appActions = {
   },
 
   // Notes
-  async uploadNote(fileOrBlob: File | Blob): Promise<{ filename: string }> {
-    return api.uploadNote(fileOrBlob);
+  async uploadNote(fileOrBlob: File | Blob, folder?: string): Promise<{ filename: string }> {
+    return api.uploadNote(fileOrBlob, folder);
   },
   async deleteNote(filename: string): Promise<void> {
     return api.deleteNote(filename);

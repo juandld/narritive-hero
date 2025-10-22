@@ -4,6 +4,8 @@ export type Note = {
   transcription?: string;
   title?: string;
   date?: string; // YYYY-MM-DD
+  created_at?: string; // ISO timestamp
+  created_ts?: number; // epoch ms
   length_seconds?: number;
   topics?: string[];
   language?: string;

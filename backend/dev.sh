@@ -12,5 +12,6 @@ fi
 # Install/update dependencies
 pip install -r requirements.txt --quiet
 
-# Run the FastAPI server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Run the FastAPI server (exec to allow parent to manage the PID)
+PORT=${BACKEND_DEV_PORT:-8000}
+exec uvicorn main:app --host 0.0.0.0 --port ${PORT} --reload

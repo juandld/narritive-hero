@@ -163,7 +163,7 @@
                   <div class="opt muted">No matches</div>
                 {:else}
                   {#each modelOptions as m}
-                    <div class="opt" on:click={() => { model = m; closeOptions(); }}>{m}</div>
+                    <button type="button" class="opt" role="option" on:click={() => { model = m; closeOptions(); }} on:keydown={(e) => { if (e.key==='Enter' || e.key===' ') { e.preventDefault(); model = m; closeOptions(); } }}>{m}</button>
                   {/each}
                 {/if}
               </div>

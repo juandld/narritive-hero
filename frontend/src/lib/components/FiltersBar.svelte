@@ -1,7 +1,9 @@
+<svelte:options runes={true} />
 <script lang="ts">
   // Compact, reusable filter bar. Emits a 'change' event with the current filters.
   import { createEventDispatcher } from 'svelte';
   import type { Filters } from '$lib/stores/filters';
+  import { dbg } from '$lib/debug';
 
   let { filters = $bindable<Filters>({
     dateFrom: '',
@@ -18,7 +20,9 @@
 
   const dispatch = createEventDispatcher();
   function emit() {
-    dispatch('change', { ...filters });
+    const payload = { ...filters };
+    dbg('FiltersBar:emit', payload);
+    dispatch('change', payload);
   }
   function selectAll() { dispatch('selectAll'); }
   function clearSelection() { dispatch('clearSelection'); }

@@ -1,4 +1,5 @@
 import type { Note } from './types';
+import { dbg } from '$lib/debug';
 import type { Filters } from '$lib/stores/filters';
 
 function isAudio(name: string): boolean { return /\.(wav|ogg|webm|m4a|mp3)$/i.test(name || ''); }
@@ -9,6 +10,7 @@ export function applyFilters(
   selectedFolder: string,
   computedDurations: Record<string, number>
 ): Note[] {
+  dbg('applyFilters:start');
   const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
   const to = filters.dateTo ? new Date(filters.dateTo) : null;
   const topicTokens = (filters.topics || '')
@@ -69,6 +71,7 @@ export function applyFilters(
   // Sorting
   const dir = filters.sortDir === 'asc' ? 1 : -1;
   const key = filters.sortKey || 'date';
+  dbg('applyFilters:sorting', { key, dir: filters.sortDir, total: filtered.length });
   const getLenRaw = (n: Note): number | null => {
     if (typeof n.length_seconds === 'number' && Number.isFinite(n.length_seconds)) return n.length_seconds as number;
     if (typeof (n as any).length_seconds === 'string') {
@@ -88,7 +91,15 @@ export function applyFilters(
   };
   const getType = (n: Note): number => (isAudio(n.filename) ? 0 : 1);
   const getDate = (n: Note): number => {
-    // Prefer explicit date
+    // Prefer precise created_ts / created_at when present
+    if (typeof (n as any).created_ts === 'number' && Number.isFinite((n as any).created_ts)) {
+      return (n as any).created_ts as number;
+    }
+    if ((n as any).created_at) {
+      const t = new Date((n as any).created_at as string).getTime();
+      if (Number.isFinite(t)) return t;
+    }
+    // Fallback to explicit date (day resolution)
     if (n.date) {
       const d = new Date(n.date).getTime();
       if (Number.isFinite(d)) return d;
@@ -126,6 +137,6 @@ export function applyFilters(
     return tb;
   };
   const sorted = filtered.slice().sort(cmp);
-  // no debug logs in production
+  dbg('applyFilters:sorted:first10', sorted.slice(0, 10).map((n) => ({ f: n.filename, d: n.date, len: n.length_seconds })));
   return sorted;
 }
