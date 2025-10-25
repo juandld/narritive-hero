@@ -181,7 +181,7 @@ async def transcribe_and_save(wav_path):
         except Exception:
             existing = None
         if isinstance(existing, dict):
-            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime"):
+            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension"):
                 if key in existing and existing[key] is not None:
                     metadata.setdefault(key, existing[key])
         metadata.setdefault("original_format", metadata.get("audio_format"))
@@ -221,7 +221,7 @@ async def transcribe_and_save(wav_path):
             except Exception:
                 existing = None
             if isinstance(existing, dict):
-                for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime"):
+                for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension"):
                     if key in existing and existing[key] is not None:
                         metadata.setdefault(key, existing[key])
             metadata.setdefault("original_format", metadata.get("audio_format"))

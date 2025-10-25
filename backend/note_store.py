@@ -208,6 +208,9 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
         if "transcoded" not in data:
             data["transcoded"] = False
             updated = True
+        if not data.get("upload_extension"):
+            data["upload_extension"] = audio_ext
+            updated = True
         if not data.get("date"):
             mtime = os.path.getmtime(audio_path)
             data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')

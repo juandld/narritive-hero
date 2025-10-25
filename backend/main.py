@@ -82,9 +82,10 @@ async def create_note(
     """API endpoint to upload a new note."""
     os.makedirs(VOICE_NOTES_DIR, exist_ok=True)
 
-    ct = (file.content_type or '').lower()
-    orig_name = (file.filename or '').lower()
-    name_ext = os.path.splitext(orig_name)[1].lstrip('.')
+    ct = file.content_type or ''
+    ct_lower = ct.lower()
+    orig_name = (file.filename or '')
+    name_ext = os.path.splitext(orig_name)[1].lstrip('.').lower()
 
     # Detect video uploads (we only keep/extract audio)
     is_video = False
@@ -95,24 +96,33 @@ async def create_note(
     source_ext = None
     target_ext = None
 
+    upload_ext = name_ext or None
+
     if not is_video:
-        if 'webm' in ct or name_ext == 'webm':
+        if 'webm' in ct_lower or name_ext == 'webm':
             source_ext = 'webm'
             target_ext = 'm4a'
             needs_transcode = True
-        elif 'ogg' in ct or name_ext == 'ogg':
+        elif 'ogg' in ct_lower or name_ext == 'ogg':
             source_ext = 'ogg'
             target_ext = 'm4a'
             needs_transcode = True
-        elif 'm4a' in ct or name_ext in ('m4a', 'mp4', 'mp4a', 'aac'):
+        elif ('m4a' in ct_lower) or ('mp4' in ct_lower) or ('aac' in ct_lower) or name_ext in ('m4a', 'mp4', 'mp4a', 'aac'):
             source_ext = 'm4a'
             target_ext = 'm4a'
-        elif 'mp3' in ct or name_ext == 'mp3':
+            # Re-encode if uploaded extension wasn't already m4a/mp4
+            needs_transcode = name_ext not in ('m4a', 'mp4', 'mp4a', 'aac')
+        elif 'mp3' in ct_lower or name_ext == 'mp3':
             source_ext = 'mp3'
             target_ext = 'mp3'
         else:
-            source_ext = 'wav'
+            source_ext = name_ext or 'wav'
             target_ext = 'wav'
+            # If the declared content-type suggests mp4 but filename is wav, prefer converting to m4a
+            if 'mp4' in ct_lower or 'aac' in ct_lower:
+                source_ext = 'm4a'
+                target_ext = 'm4a'
+                needs_transcode = True
     else:
         # Video inputs → convert audio track to AAC (m4a) for broad compatibility
         source_ext = (name_ext or 'mkv')
@@ -121,11 +131,11 @@ async def create_note(
 
     ext = (target_ext or source_ext or 'm4a')
     ext = (ext or 'm4a').lower()
-    source_ext = (source_ext or '').lower()
-    source_ext = source_ext or None
+    source_ext = (source_ext or '').lower() or None
     logging.info(
-        "Incoming note upload: original_name=%s content_type=%s source_ext=%s -> target_ext=%s (transcode=%s)",
+        "Incoming note upload: original_name=%s upload_ext=%s content_type=%s source_ext=%s -> target_ext=%s (transcode=%s)",
         orig_name,
+        upload_ext or "unknown",
         ct or "unknown",
         source_ext or "unknown",
         ext,
@@ -144,15 +154,17 @@ async def create_note(
         "original_format": source_ext or ext,
         "transcoded": bool(needs_transcode),
     }
+    if upload_ext:
+        metadata_fields["upload_extension"] = upload_ext
     if needs_transcode and source_ext and source_ext != ext:
         metadata_fields["transcoded_from"] = source_ext
     if ct:
         metadata_fields["content_type"] = ct
-    if needs_transcode:
+    if needs_transcode or ext in ('m4a', 'wav'):
         if ext == 'm4a':
-            metadata_fields["sample_rate_hz"] = 44100
+            metadata_fields.setdefault("sample_rate_hz", 44100)
         elif ext == 'wav':
-            metadata_fields["sample_rate_hz"] = 16000
+            metadata_fields.setdefault("sample_rate_hz", 16000)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{uuid.uuid4().hex[:6]}.{ext}"
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
