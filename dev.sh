@@ -1,6 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-#!/bin/bash
 
 # Respect user-defined dev ports
 FRONTEND_DEV_PORT=${FRONTEND_DEV_PORT:-5173}
@@ -38,6 +37,17 @@ fi
 echo "Starting frontend dev server on :$FE_PORT..."
 (
   cd frontend
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required but was not found in PATH." >&2
+    exit 1
+  fi
+  if [ ! -d node_modules ]; then
+    echo "Installing frontend dependencies (node_modules missing)..."
+    npm install
+  elif [ -f package-lock.json ] && [ node_modules -ot package-lock.json ]; then
+    echo "package-lock.json newer than node_modules; running npm install..."
+    npm install
+  fi
   exec npm run dev -- --port ${FE_PORT} --strictPort
 ) &
 FE_PID=$!
@@ -67,5 +77,24 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 # Wait for either to exit, then cleanup
-wait -n ${FE_PID} ${BE_PID}
+wait_for_either() {
+  # Modern Bash (>=4.3) supports wait -n; try it first.
+  if wait -n "${FE_PID}" "${BE_PID}" 2>/dev/null; then
+    return $?
+  fi
+  # Fallback for older shells: poll until one child exits.
+  while true; do
+    if ! kill -0 "${FE_PID}" >/dev/null 2>&1; then
+      wait "${FE_PID}" 2>/dev/null
+      return $?
+    fi
+    if ! kill -0 "${BE_PID}" >/dev/null 2>&1; then
+      wait "${BE_PID}" 2>/dev/null
+      return $?
+    fi
+    sleep 1
+  done
+}
+
+wait_for_either
 exit $?

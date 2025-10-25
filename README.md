@@ -4,11 +4,12 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 
 ## Quick Start (TL;DR)
 
-- Backend: copy `backend/.env.example` to `backend/.env` and add your keys.
+- Backend env: create `backend/.env` with your API keys (example below). At minimum set `GOOGLE_API_KEY`.
+- First-time backend setup: `cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt`
 - Dev mode:
-  - In one terminal: `cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
-  - In another: `cd frontend && npm install && npm run dev`
-  - Open `http://localhost:5173`
+  - Option A: from the repo root run `./dev.sh` (auto-picks a free Vite port, ensures frontend deps/ backend venv exist, and starts both servers)
+  - Option B: run them manually — backend command above in one terminal, `cd frontend && npm install && npm run dev` in another
+  - App: open `http://localhost:5173`
 - Docker (all-in-one): `docker compose up --build` then open `http://localhost` (backend at `http://localhost:8000`).
 - Add notes: click Upload (Topbar), drag & drop audio anywhere, use Start Recording, or click New Text Note to paste an existing transcript.
 - Expand/collapse text: click the ▼/▲ toggle within a note card. You can also switch views (List/Compact/Grid) from the Topbar.
@@ -75,6 +76,8 @@ flowchart LR
 - Docker and Docker Compose (optional)
 - Node.js 18+ and npm (frontend)
 - Python 3.10+ and pip (backend)
+  - macOS: install via Homebrew (`brew install python@3.11`) or pyenv (`pyenv install 3.11.10`)
+  - Ubuntu/Debian: `sudo apt-get install -y python3.11 python3.11-venv`
 - API keys: Google AI (Gemini). Optional: OpenAI (fallbacks)
 - FFmpeg for local dev if you plan to upload non‑WAV audio or video files (Docker image already includes it)
 
@@ -96,12 +99,10 @@ This is the recommended way to run the project.
     cd narritive-hero
     ```
 
-2.  **Create a `.env` file (backend):**
-   You can start from the example file.
+2.  **Create `backend/.env`:**
+   At minimum provide `GOOGLE_API_KEY`. Example:
     ```ini
-    # Copy example and edit values
-    # cp backend/.env.example backend/.env
-
+    # backend/.env
     # Primary Gemini key
     GOOGLE_API_KEY="your-gemini-key-A"
     # Optional extra Gemini keys for rotation
@@ -147,7 +148,7 @@ For development, you can run the frontend and backend services separately, or us
     cd backend
     ```
 
-2.  **Create `.env` (see example above).**
+2.  **Create or edit `.env` (see example above).**
 
 3.  **Create a virtualenv (first time only):**
     ```bash
@@ -195,7 +196,7 @@ From the repo root you can start both dev servers together:
 ```bash
 ./dev.sh
 ```
-This launches the Svelte dev server and the FastAPI dev server concurrently.
+Prereqs: create `backend/.env` and ensure Python 3.10+ is available (macOS usually ships 3.9; install Python 3.11 via Homebrew `brew install python@3.11`, or use pyenv). The script picks the first free Vite port starting at `5173`, ensures the frontend has `node_modules`, ensures a backend virtualenv exists (creating it on the fly if needed), exports matching CORS origins, installs/updates deps, and runs both servers until you press Ctrl+C. If a port is stuck, `./stop-dev.sh` kills the default dev ports (`5173` / `8000`). To point the helper at a custom interpreter (e.g., pyenv shim), run `PYTHON_BIN=$(pyenv which python) ./dev.sh`.
 
 ## Project Structure
 
@@ -216,11 +217,11 @@ This launches the Svelte dev server and the FastAPI dev server concurrently.
 
 Notes:
 - In Docker, the frontend is served as static files via Nginx and the browser calls the backend at `http://localhost:8000` directly (published from the backend container). No proxy is required.
-- All storage subfolders (`voice_notes`, `transcriptions`, `narratives`, `formats`, `folders`) are volume‑mapped by default (see `compose.yaml`).
+- All storage subfolders (`voice_notes`, `transcriptions`, `narratives`, `formats`, `folders`) are volume‑mapped by default (see `compose.yaml`). Backend startup ensures these folders exist, and `config.py` can relocate them by setting `STORAGE_DIR`.
 
 ## Environment Variables
 
-Backend reads from `backend/.env` (copy from `.env.example`). Compose now also loads the repo root `.env` for backend, so you can put production values there too. Common keys:
+Backend reads from `backend/.env`. Compose now also loads the repo root `.env` for backend, so you can put production values there too. Common keys:
 
 - `GOOGLE_API_KEY`, `GOOGLE_API_KEY_1..3` — Gemini API keys (rotation supported)
 - `GOOGLE_MODEL` — optional model override (normalized, e.g. `gemini 2.5 flash`)
@@ -230,6 +231,7 @@ Backend reads from `backend/.env` (copy from `.env.example`). Compose now also l
 - `OPENAI_TITLE_MODEL` — default `gpt-4o-mini`
 - `OPENAI_NARRATIVE_MODEL` — default `gpt-4o`
 - `ALLOWED_ORIGINS` — comma‑separated list of frontend origins for CORS (e.g., `https://app.example.com,https://www.example.com`). Can be set in `backend/.env` or root `.env`.
+- `ALLOWED_ORIGIN`, `ALLOWED_ORIGIN_1..N` — optional individual CORS entries (take precedence over `ALLOWED_ORIGINS`).
 
 Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (uses `VITE_BACKEND_URL` at build, or computes `http(s)://<current-host>:8000` at runtime if unset).
 You can set `VITE_BACKEND_URL` at build time to point the frontend at your API (e.g., `https://api.example.com`).
@@ -348,8 +350,9 @@ Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, thi
 - Can’t expand text? Click the ▼ button inside the note card to toggle the full transcription. In Compact view, the same toggle applies per note.
 - Upload works but no text appears: transcription runs in the background; refresh after a moment. If it failed, try “Retry” via `POST /api/notes/{filename}/retry` or re-upload.
 - 429/quota errors: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
-- Ports busy: adjust mappings in `compose.yaml` or run dev servers on different ports.
+- Ports busy: adjust mappings in `compose.yaml`, rerun `./dev.sh` (it auto-picks a free Vite port), or use `./stop-dev.sh` to clear default dev ports.
 - Non‑WAV audio and video-to-audio extraction require FFmpeg at runtime (Docker image installs FFmpeg; for local dev, install it via your OS package manager).
+- Backend script exits complaining about Python 3.9: install Python 3.10+ (see prerequisites) and rerun `PYTHON_BIN=/path/to/python ./dev.sh`.
 - CORS blocked in production: set `ALLOWED_ORIGINS` in `backend/.env` to your deployed frontend origin(s), e.g., `ALLOWED_ORIGINS=https://app.example.com`.
 - Frontend calling the wrong API host: rebuild the frontend with `VITE_BACKEND_URL` set to your API origin (e.g., `export VITE_BACKEND_URL=https://api.example.com && docker compose up --build`).
 
@@ -424,7 +427,7 @@ Notes
 ## Daily Dev Workflow
 
 - Bootstrap:
-  - Ensure `backend/.env` exists (copy from `.env.example`). At minimum set `GOOGLE_API_KEY`.
+  - Ensure `backend/.env` exists (see example above). At minimum set `GOOGLE_API_KEY`.
   - Start backend and frontend (see shortcuts above).
 - Iterate:
   - Backend change → hot reload via Uvicorn.
@@ -447,7 +450,7 @@ Notes
 - Add route: edit `backend/main.py` and define a FastAPI handler. Keep business logic in `services.py` and persistence in `note_store.py`.
 - Persist metadata: read/write via `note_store.save_note_json()` to keep schema consistent.
 - Use LLMs: via helpers in `providers.py` (`invoke_google`, `openai_chat`, `transcribe_with_openai`).
-- Config: add env in `backend/config.py`; document in `.env.example` and README.
+- Config: add env in `backend/config.py`; document new keys in this README (Env & Secrets section).
 - Startup tasks: non-blocking backfill logic lives in `utils.py:on_startup()` and is invoked from `main.py`.
 
 ## Extending the Frontend (cheat sheet)
