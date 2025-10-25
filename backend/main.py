@@ -91,27 +91,71 @@ async def create_note(
     if ct.startswith('video/') or name_ext in ('mkv', 'mp4', 'mov', 'avi'):
         is_video = True
 
+    needs_transcode = False
+    source_ext = None
+    target_ext = None
+
     if not is_video:
         if 'webm' in ct or name_ext == 'webm':
-            ext = 'webm'
+            source_ext = 'webm'
+            target_ext = 'wav'
+            needs_transcode = True
         elif 'ogg' in ct or name_ext == 'ogg':
-            ext = 'ogg'
+            source_ext = 'ogg'
+            target_ext = 'wav'
+            needs_transcode = True
         elif 'm4a' in ct or name_ext in ('m4a', 'mp4', 'mp4a'):
-            ext = 'm4a'
+            source_ext = 'm4a'
+            target_ext = 'm4a'
         elif 'mp3' in ct or name_ext == 'mp3':
-            ext = 'mp3'
+            source_ext = 'mp3'
+            target_ext = 'mp3'
         else:
-            ext = 'wav'
+            source_ext = 'wav'
+            target_ext = 'wav'
     else:
         # For video inputs, convert to WAV for broad compatibility
-        ext = 'wav'
+        source_ext = name_ext or 'mkv'
+        target_ext = 'wav'
+        needs_transcode = True
+
+    ext = target_ext or source_ext or 'wav'
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{uuid.uuid4().hex[:6]}.{ext}"
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
 
     if not is_video:
-        with open(file_path, "wb") as buffer:
-            buffer.write(file.file.read())
+        # Save upload, optionally transcode to a mobile-friendly format (wav)
+        upload_bytes = file.file.read()
+        if needs_transcode:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.' + (source_ext or 'tmp')) as tmp:
+                tmp.write(upload_bytes)
+                tmp_path = tmp.name
+            try:
+                cmd = [
+                    'ffmpeg', '-y', '-i', tmp_path,
+                    '-ac', '1', '-ar', '16000', file_path
+                ]
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except Exception as e:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except Exception:
+                    pass
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+                return Response(status_code=400, content=f"Failed to normalize audio: {e}")
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        else:
+            with open(file_path, "wb") as buffer:
+                buffer.write(upload_bytes)
     else:
         # Write uploaded video to a temporary file, then extract audio to WAV
         with tempfile.NamedTemporaryFile(delete=False, suffix='.' + (name_ext or 'mkv')) as tmp:

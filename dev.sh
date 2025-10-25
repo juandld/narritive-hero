@@ -33,6 +33,8 @@ if [ "$FE_PORT" != "$FRONTEND_DEV_PORT" ]; then
   echo "Note: Requested :$FRONTEND_DEV_PORT busy; using :$FE_PORT"
 fi
 
+FRONTEND_DEV_HOST=${FRONTEND_DEV_HOST:-0.0.0.0}
+
 # Start frontend dev server (use chosen free port). Use exec so PID is npm itself.
 echo "Starting frontend dev server on :$FE_PORT..."
 (
@@ -48,7 +50,7 @@ echo "Starting frontend dev server on :$FE_PORT..."
     echo "package-lock.json newer than node_modules; running npm install..."
     npm install
   fi
-  exec npm run dev -- --port ${FE_PORT} --strictPort
+  exec npm run dev -- --host ${FRONTEND_DEV_HOST} --port ${FE_PORT} --strictPort
 ) &
 FE_PID=$!
 
@@ -58,6 +60,9 @@ echo "Starting backend dev server on :$BACKEND_DEV_PORT..."
   cd backend
   export ALLOWED_ORIGIN_1=http://localhost:${FE_PORT}
   export ALLOWED_ORIGIN_2=http://127.0.0.1:${FE_PORT}
+  if [ -n "${EXTERNAL_DEV_ORIGIN:-}" ]; then
+    export ALLOWED_ORIGIN_3=${EXTERNAL_DEV_ORIGIN}
+  fi
   export BACKEND_DEV_PORT=${BACKEND_DEV_PORT}
   exec ./dev.sh
 ) &

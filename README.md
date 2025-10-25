@@ -25,6 +25,7 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 - Tags: add your own color-coded tags (with last-used color remembered)
 - Bulk actions: delete selected notes, create narratives from selection
 - Narratives: list, open, delete, assign folders; generate or iterate with formats
+- Cross-device audio: WebM/Ogg recordings are normalized to WAV so notes play back on iOS/Safari (requires FFmpeg, already bundled in Docker).
 
 ## How It Works
 
@@ -197,6 +198,14 @@ From the repo root you can start both dev servers together:
 ./dev.sh
 ```
 Prereqs: create `backend/.env` and ensure Python 3.10+ is available (macOS usually ships 3.9; install Python 3.11 via Homebrew `brew install python@3.11`, or use pyenv). The script picks the first free Vite port starting at `5173`, ensures the frontend has `node_modules`, ensures a backend virtualenv exists (creating it on the fly if needed), exports matching CORS origins, installs/updates deps, and runs both servers until you press Ctrl+C. If a port is stuck, `./stop-dev.sh` kills the default dev ports (`5173` / `8000`). To point the helper at a custom interpreter (e.g., pyenv shim), run `PYTHON_BIN=$(pyenv which python) ./dev.sh`.
+
+Need to hit the dev UI from another device (phone/tablet)? Start the helper with:
+
+```bash
+EXTERNAL_DEV_ORIGIN=http://<laptop-ip>:5173 ./dev.sh
+```
+
+The frontend dev server already listens on `0.0.0.0`, so visiting `http://<laptop-ip>:5173` from the same LAN works once CORS knows about your external origin. Replace `<laptop-ip>` with the address of your machine (e.g., `192.168.1.50`). On macOS you can grab it with `ipconfig getifaddr en0`; on Linux use `hostname -I`.
 
 ## Project Structure
 
