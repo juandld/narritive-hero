@@ -98,13 +98,13 @@ async def create_note(
     if not is_video:
         if 'webm' in ct or name_ext == 'webm':
             source_ext = 'webm'
-            target_ext = 'wav'
+            target_ext = 'm4a'
             needs_transcode = True
         elif 'ogg' in ct or name_ext == 'ogg':
             source_ext = 'ogg'
-            target_ext = 'wav'
+            target_ext = 'm4a'
             needs_transcode = True
-        elif 'm4a' in ct or name_ext in ('m4a', 'mp4', 'mp4a'):
+        elif 'm4a' in ct or name_ext in ('m4a', 'mp4', 'mp4a', 'aac'):
             source_ext = 'm4a'
             target_ext = 'm4a'
         elif 'mp3' in ct or name_ext == 'mp3':
@@ -114,62 +114,40 @@ async def create_note(
             source_ext = 'wav'
             target_ext = 'wav'
     else:
-        # For video inputs, convert to WAV for broad compatibility
+        # Video inputs → convert audio track to AAC (m4a) for broad compatibility
         source_ext = name_ext or 'mkv'
-        target_ext = 'wav'
+        target_ext = 'm4a'
         needs_transcode = True
 
-    ext = target_ext or source_ext or 'wav'
+    ext = target_ext or source_ext or 'm4a'
+    logging.info(
+        "Incoming note upload: original_name=%s content_type=%s source_ext=%s -> target_ext=%s (transcode=%s)",
+        orig_name,
+        ct or "unknown",
+        source_ext or "unknown",
+        ext,
+        needs_transcode,
+    )
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{uuid.uuid4().hex[:6]}.{ext}"
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
 
-    if not is_video:
-        # Save upload, optionally transcode to a mobile-friendly format (wav)
-        upload_bytes = file.file.read()
-        if needs_transcode:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.' + (source_ext or 'tmp')) as tmp:
-                tmp.write(upload_bytes)
-                tmp_path = tmp.name
-            try:
-                cmd = [
-                    'ffmpeg', '-y', '-i', tmp_path,
-                    '-ac', '1', '-ar', '16000', file_path
-                ]
-                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            except Exception as e:
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                except Exception:
-                    pass
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-                return Response(status_code=400, content=f"Failed to normalize audio: {e}")
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-        else:
-            with open(file_path, "wb") as buffer:
-                buffer.write(upload_bytes)
-    else:
-        # Write uploaded video to a temporary file, then extract audio to WAV
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.' + (name_ext or 'mkv')) as tmp:
-            tmp.write(file.file.read())
+    # Read entire upload once (handles both audio and video)
+    upload_bytes = file.file.read()
+    if needs_transcode:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.' + (source_ext or 'tmp')) as tmp:
+            tmp.write(upload_bytes)
             tmp_path = tmp.name
         try:
-            # ffmpeg -y -i input -vn -ac 1 -ar 16000 output.wav
-            cmd = [
-                'ffmpeg', '-y', '-i', tmp_path,
-                '-vn', '-ac', '1', '-ar', '16000', file_path
-            ]
+            cmd = ['ffmpeg', '-y', '-i', tmp_path]
+            if ext == 'm4a':
+                cmd += ['-vn', '-ac', '1', '-ar', '44100', '-c:a', 'aac', '-b:a', '128k', file_path]
+            elif ext == 'wav':
+                cmd += ['-vn', '-ac', '1', '-ar', '16000', file_path]
+            else:
+                cmd += ['-vn', file_path]
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except Exception as e:
-            # Clean up partial file on failure
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
@@ -179,12 +157,15 @@ async def create_note(
                 os.remove(tmp_path)
             except Exception:
                 pass
-            return Response(status_code=400, content=f"Failed to extract audio: {e}")
+            return Response(status_code=400, content=f"Failed to normalize audio: {e}")
         finally:
             try:
                 os.remove(tmp_path)
             except Exception:
                 pass
+    else:
+        with open(file_path, "wb") as buffer:
+            buffer.write(upload_bytes)
     
     # If a folder is provided, create or update a minimal JSON immediately so
     # the note appears under the selected folder before transcription completes.
