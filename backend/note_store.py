@@ -118,7 +118,7 @@ def note_json_path(base_filename: str) -> str:
     return os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
 
 
-def build_note_payload(audio_filename: str, title: str, transcription: str) -> dict:
+def build_note_payload(audio_filename: str, title: str, transcription: str, metadata: Optional[dict] = None) -> dict:
     """Build note JSON payload using the actual audio filename (with extension)."""
     audio_path = os.path.join(config.VOICE_NOTES_DIR, audio_filename)
     mtime = os.path.getmtime(audio_path) if os.path.exists(audio_path) else None
@@ -128,7 +128,7 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
     length_sec = audio_length_seconds(audio_path) if mtime else None
     topics = infer_topics(transcription, title)
     language = infer_language(transcription, title)
-    return {
+    payload = {
         "filename": audio_filename,
         "title": title,
         "transcription": transcription,
@@ -141,6 +141,11 @@ def build_note_payload(audio_filename: str, title: str, transcription: str) -> d
         "folder": "",
         "tags": [],
     }
+    if metadata:
+        for key, value in metadata.items():
+            if value is not None:
+                payload[key] = value
+    return payload
 
 
 def load_note_json(base_filename: str) -> Tuple[dict | None, str | None, str | None]:
@@ -183,6 +188,26 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
     updated = False
     jp = note_json_path(base_filename)
     if audio_path and os.path.exists(audio_path):
+        audio_ext = os.path.splitext(audio_path)[1].lstrip('.').lower() or 'wav'
+        stored_mime = {
+            'm4a': 'audio/mp4',
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'ogg': 'audio/ogg',
+            'webm': 'audio/webm',
+        }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+        if not data.get("audio_format"):
+            data["audio_format"] = audio_ext
+            updated = True
+        if not data.get("stored_mime"):
+            data["stored_mime"] = stored_mime
+            updated = True
+        if not data.get("original_format"):
+            data["original_format"] = data.get("audio_format") or audio_ext
+            updated = True
+        if "transcoded" not in data:
+            data["transcoded"] = False
+            updated = True
         if not data.get("date"):
             mtime = os.path.getmtime(audio_path)
             data["date"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')

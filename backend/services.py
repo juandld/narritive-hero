@@ -158,26 +158,77 @@ async def transcribe_and_save(wav_path):
                 title_text = "Title generation failed."
         print(f"Successfully generated title for {base_filename}.")
 
-        payload = note_store.build_note_payload(base_filename, title_text, transcribed_text)
-        # Preserve user metadata (e.g., folder, tags) if a JSON was created earlier
+        base_name = os.path.splitext(base_filename)[0]
+        audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
+        stored_mime = {
+            'm4a': 'audio/mp4',
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'ogg': 'audio/ogg',
+            'webm': 'audio/webm',
+        }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+        metadata = {
+            "audio_format": audio_ext,
+            "stored_mime": stored_mime,
+        }
+        if audio_ext == 'm4a':
+            metadata.setdefault("sample_rate_hz", 44100)
+        elif audio_ext == 'wav':
+            metadata.setdefault("sample_rate_hz", 16000)
+        existing = None
         try:
-            existing, _, _ = note_store.load_note_json(os.path.splitext(base_filename)[0])
-            if isinstance(existing, dict):
-                if 'folder' in existing and (existing.get('folder') or '').strip() != '':
-                    payload['folder'] = existing.get('folder')
-                if 'tags' in existing and isinstance(existing.get('tags'), list):
-                    payload['tags'] = existing.get('tags')
+            existing, _, _ = note_store.load_note_json(base_name)
         except Exception:
-            pass
-        note_store.save_note_json(os.path.splitext(base_filename)[0], payload)
+            existing = None
+        if isinstance(existing, dict):
+            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime"):
+                if key in existing and existing[key] is not None:
+                    metadata.setdefault(key, existing[key])
+        metadata.setdefault("original_format", metadata.get("audio_format"))
+        metadata.setdefault("transcoded", False)
+        payload = note_store.build_note_payload(base_filename, title_text, transcribed_text, metadata)
+        if isinstance(existing, dict):
+            if 'folder' in existing and (existing.get('folder') or '').strip() != '':
+                payload['folder'] = existing.get('folder')
+            if 'tags' in existing and isinstance(existing.get('tags'), list):
+                payload['tags'] = existing.get('tags')
+        note_store.save_note_json(base_name, payload)
         print(f"Successfully saved transcription and title for {base_filename}.")
 
     except Exception as e:
         print(f"Error during transcription/titling for {wav_path}: {e}")
         if os.path.exists(wav_path):
-            payload = note_store.build_note_payload(base_filename, "Title generation failed.", "Transcription failed.")
+            base_name = os.path.splitext(base_filename)[0]
+            audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
+            stored_mime = {
+                'm4a': 'audio/mp4',
+                'mp3': 'audio/mpeg',
+                'wav': 'audio/wav',
+                'ogg': 'audio/ogg',
+                'webm': 'audio/webm',
+            }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+            metadata = {
+                "audio_format": audio_ext,
+                "stored_mime": stored_mime,
+            }
+            if audio_ext == 'm4a':
+                metadata.setdefault("sample_rate_hz", 44100)
+            elif audio_ext == 'wav':
+                metadata.setdefault("sample_rate_hz", 16000)
+            existing = None
             try:
-                existing, _, _ = note_store.load_note_json(os.path.splitext(base_filename)[0])
+                existing, _, _ = note_store.load_note_json(base_name)
+            except Exception:
+                existing = None
+            if isinstance(existing, dict):
+                for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime"):
+                    if key in existing and existing[key] is not None:
+                        metadata.setdefault(key, existing[key])
+            metadata.setdefault("original_format", metadata.get("audio_format"))
+            metadata.setdefault("transcoded", False)
+            payload = note_store.build_note_payload(base_filename, "Title generation failed.", "Transcription failed.", metadata)
+            try:
+                existing = existing or {}
                 if isinstance(existing, dict):
                     if 'folder' in existing and (existing.get('folder') or '').strip() != '':
                         payload['folder'] = existing.get('folder')
@@ -185,7 +236,7 @@ async def transcribe_and_save(wav_path):
                         payload['tags'] = existing.get('tags')
             except Exception:
                 pass
-            note_store.save_note_json(os.path.splitext(base_filename)[0], payload)
+            note_store.save_note_json(base_name, payload)
 
 # Removed unused helpers and scenario-related functions to reduce complexity
 
@@ -217,6 +268,14 @@ def get_notes():
             mtime = os.path.getmtime(audio_path)
             date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
             length_sec = note_store.audio_length_seconds(audio_path)
+            audio_ext = os.path.splitext(filename)[1].lstrip('.').lower() or 'wav'
+            stored_mime = {
+                'm4a': 'audio/mp4',
+                'mp3': 'audio/mpeg',
+                'wav': 'audio/wav',
+                'ogg': 'audio/ogg',
+                'webm': 'audio/webm',
+            }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
             notes.append({
                 "filename": filename,
                 "transcription": transcription,  # likely None
@@ -228,6 +287,10 @@ def get_notes():
                 "topics": [],
                 "folder": "",
                 "tags": [],
+                "audio_format": audio_ext,
+                "stored_mime": stored_mime,
+                "original_format": audio_ext,
+                "transcoded": False,
             })
             continue
         else:

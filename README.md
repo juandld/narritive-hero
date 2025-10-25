@@ -25,7 +25,7 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 - Tags: add your own color-coded tags (with last-used color remembered)
 - Bulk actions: delete selected notes, create narratives from selection
 - Narratives: list, open, delete, assign folders; generate or iterate with formats
-- Cross-device audio: WebM/Ogg recordings are normalized to WAV so notes play back on iOS/Safari (requires FFmpeg, already bundled in Docker).
+- Cross-device audio: WebM/Ogg/video recordings are normalized to AAC `.m4a` so notes play back on iOS/Safari; note cards display the stored format so you can verify conversions (FFmpeg handles this automatically; Docker images already include it).
 
 ## How It Works
 
@@ -199,13 +199,18 @@ From the repo root you can start both dev servers together:
 ```
 Prereqs: create `backend/.env` and ensure Python 3.10+ is available (macOS usually ships 3.9; install Python 3.11 via Homebrew `brew install python@3.11`, or use pyenv). The script picks the first free Vite port starting at `5173`, ensures the frontend has `node_modules`, ensures a backend virtualenv exists (creating it on the fly if needed), exports matching CORS origins, installs/updates deps, and runs both servers until you press Ctrl+C. If a port is stuck, `./stop-dev.sh` kills the default dev ports (`5173` / `8000`). To point the helper at a custom interpreter (e.g., pyenv shim), run `PYTHON_BIN=$(pyenv which python) ./dev.sh`.
 
-Need to hit the dev UI from another device (phone/tablet)? Start the helper with:
+Need to hit the dev UI from another device (phone/tablet)? Start the helper with HTTPS so mobile browsers allow microphone access:
 
 ```bash
-EXTERNAL_DEV_ORIGIN=http://<laptop-ip>:5173 ./dev.sh
+FRONTEND_DEV_HOST=dev.narrative.local \ 
+FRONTEND_USE_HTTPS=1 \ 
+FRONTEND_CERT=./certs/dev.narrative.local.pem \ 
+FRONTEND_KEY=./certs/dev.narrative.local-key.pem \ 
+EXTERNAL_DEV_ORIGIN=https://dev.narrative.local:5173 \ 
+./dev.sh
 ```
 
-The frontend dev server already listens on `0.0.0.0`, so visiting `http://<laptop-ip>:5173` from the same LAN works once CORS knows about your external origin. Replace `<laptop-ip>` with the address of your machine (e.g., `192.168.1.50`). On macOS you can grab it with `ipconfig getifaddr en0`; on Linux use `hostname -I`.
+Point `dev.narrative.local` at your laptop (`/etc/hosts`), generate a trusted cert (e.g., with [`mkcert`](https://github.com/FiloSottile/mkcert)), and visit `https://dev.narrative.local:5173` from any device on the LAN. For a quick check without certificates, you can still bind to `http://<laptop-ip>:5173` (`EXTERNAL_DEV_ORIGIN=http://<ip>:5173`), but iOS will block microphone access until you serve over HTTPS.
 
 ## Project Structure
 
@@ -281,7 +286,14 @@ Each audio file `storage/voice_notes/<base>.<ext>` has `storage/transcriptions/<
   "topics": ["standup", "team", "progress"],
   "language": "en",
   "folder": "",
-  "tags": [{ "label": "work", "color": "#3B82F6" }]
+  "tags": [{ "label": "work", "color": "#3B82F6" }],
+  "audio_format": "m4a",
+  "stored_mime": "audio/mp4",
+  "original_format": "webm",
+  "transcoded": true,
+  "transcoded_from": "webm",
+  "content_type": "audio/webm",
+  "sample_rate_hz": 44100
 }
 ```
 
@@ -351,6 +363,7 @@ Open API docs: visit `http://localhost:8000/docs`.
 - NoteItem: tag chips with compact color picker, preview snippet, expand/collapse
 - Config: `frontend/src/lib/config.ts` hosts `BACKEND_URL`
 - Narrative model picker: searchable selector with live suggestions from `/api/models` (auto-updates from provider catalogs when keys are configured; shows latest big and small from each provider)
+- Audio format badge: every note with audio shows the stored codec (e.g., `M4A`). Hover/tap to see whether it was transcoded, the source MIME type, and sample rate—handy when debugging cross-device playback.
 
 Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, this is correct because requests originate from the browser, not inside the container. Use the top bar “Narratives” to open the full narratives page.
 
@@ -361,6 +374,7 @@ Default `BACKEND_URL` is `http://localhost:8000`. When using Docker Compose, thi
 - 429/quota errors: the backend rotates Gemini keys automatically and falls back to OpenAI when configured.
 - Ports busy: adjust mappings in `compose.yaml`, rerun `./dev.sh` (it auto-picks a free Vite port), or use `./stop-dev.sh` to clear default dev ports.
 - Non‑WAV audio and video-to-audio extraction require FFmpeg at runtime (Docker image installs FFmpeg; for local dev, install it via your OS package manager).
+- Safari/iOS can only access the microphone from secure origins: use HTTPS locally (e.g., mkcert + `https://dev.narrative.local:5173`) or a tunnel (ngrok/Cloudflare) when testing on a phone.
 - Backend script exits complaining about Python 3.9: install Python 3.10+ (see prerequisites) and rerun `PYTHON_BIN=/path/to/python ./dev.sh`.
 - CORS blocked in production: set `ALLOWED_ORIGINS` in `backend/.env` to your deployed frontend origin(s), e.g., `ALLOWED_ORIGINS=https://app.example.com`.
 - Frontend calling the wrong API host: rebuild the frontend with `VITE_BACKEND_URL` set to your API origin (e.g., `export VITE_BACKEND_URL=https://api.example.com && docker compose up --build`).

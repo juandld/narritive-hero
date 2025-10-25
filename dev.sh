@@ -4,6 +4,10 @@ set -euo pipefail
 # Respect user-defined dev ports
 FRONTEND_DEV_PORT=${FRONTEND_DEV_PORT:-5173}
 BACKEND_DEV_PORT=${BACKEND_DEV_PORT:-8000}
+FRONTEND_DEV_HOST=${FRONTEND_DEV_HOST:-0.0.0.0}
+FRONTEND_USE_HTTPS=${FRONTEND_USE_HTTPS:-0}
+FRONTEND_CERT=${FRONTEND_CERT:-}
+FRONTEND_KEY=${FRONTEND_KEY:-}
 
 is_port_free() {
   local port=$1
@@ -33,8 +37,6 @@ if [ "$FE_PORT" != "$FRONTEND_DEV_PORT" ]; then
   echo "Note: Requested :$FRONTEND_DEV_PORT busy; using :$FE_PORT"
 fi
 
-FRONTEND_DEV_HOST=${FRONTEND_DEV_HOST:-0.0.0.0}
-
 # Start frontend dev server (use chosen free port). Use exec so PID is npm itself.
 echo "Starting frontend dev server on :$FE_PORT..."
 (
@@ -50,7 +52,17 @@ echo "Starting frontend dev server on :$FE_PORT..."
     echo "package-lock.json newer than node_modules; running npm install..."
     npm install
   fi
-  exec npm run dev -- --host ${FRONTEND_DEV_HOST} --port ${FE_PORT} --strictPort
+  extra_flags=(--host "${FRONTEND_DEV_HOST}" --port "${FE_PORT}" --strictPort)
+  if [ "${FRONTEND_USE_HTTPS}" = "1" ]; then
+    extra_flags+=(--https)
+    if [ -n "${FRONTEND_CERT}" ]; then
+      extra_flags+=(--cert "${FRONTEND_CERT}")
+    fi
+    if [ -n "${FRONTEND_KEY}" ]; then
+      extra_flags+=(--key "${FRONTEND_KEY}")
+    fi
+  fi
+  exec npm run dev -- "${extra_flags[@]}"
 ) &
 FE_PID=$!
 

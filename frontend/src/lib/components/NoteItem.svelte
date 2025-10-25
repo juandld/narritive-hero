@@ -10,6 +10,13 @@
     topics?: string[];
     folder?: string;
     tags?: { label: string; color?: string }[];
+    audio_format?: string;
+    content_type?: string;
+    stored_mime?: string;
+    original_format?: string;
+    transcoded?: boolean;
+    transcoded_from?: string;
+    sample_rate_hz?: number;
   };
   export let expanded: boolean;
   export let selected: boolean;
@@ -96,6 +103,27 @@
   const MAX_PREVIEW = 140;
   $: previewText = (note.transcription || '').trim();
   $: hasAudio = /\.(wav|ogg|webm|m4a|mp3)$/i.test(note.filename || '');
+  $: audioFormat = (note.audio_format || (note.filename?.split('.').pop() || '') || '').toUpperCase();
+  $: originalFormat = (note.transcoded_from || note.original_format || '').toUpperCase();
+  $: formatLabel = hasAudio ? (audioFormat || 'AUDIO') : '';
+  $: formatTooltip = hasAudio ? (() => {
+      let tip = `Stored as ${formatLabel}`;
+      if (note.transcoded && originalFormat && originalFormat !== formatLabel) {
+        tip += ` (converted from ${originalFormat})`;
+      } else if (!note.transcoded && originalFormat && originalFormat !== formatLabel) {
+        tip += ` (original ${originalFormat})`;
+      }
+      if (note.sample_rate_hz) {
+        tip += `\nSample rate: ${note.sample_rate_hz} Hz`;
+      }
+      if (note.content_type) {
+        tip += `\nSource MIME: ${note.content_type}`;
+      }
+      if (note.stored_mime) {
+        tip += `\nStored MIME: ${note.stored_mime}`;
+      }
+      return tip;
+    })() : '';
 
   function toggleExpand() {
     dispatch('toggle');
@@ -159,6 +187,9 @@
     <p class="title">{note.title || note.filename.replace(/\.\w+$/i,'')}</p>
     <div class="tools">
       <span class="badge type" title="Type">{hasAudio ? 'Audio' : 'Text'}</span>
+      {#if hasAudio && formatLabel}
+        <span class="badge format" title={formatTooltip}>{formatLabel}</span>
+      {/if}
       {#if note.language}
         <span class="badge lang" title="Language">{note.language}</span>
       {/if}
@@ -249,6 +280,7 @@
   .tools { display:flex; align-items:center; gap:.35rem; }
   .badge { font-size:.7rem; background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:9999px; }
   .badge.lang { background:#e8f0fe; color:#1a73e8; }
+  .badge.format { background:#ecfdf5; color:#047857; }
   .mini { border:1px solid #e5e7eb; background:#fff; color:#374151; border-radius:6px; padding:.15rem .4rem; cursor:pointer; font-size:.85rem; }
   .chips { margin: .25rem 0 .5rem 0; display:flex; gap:.35rem; flex-wrap: wrap; }
   .topic { background:#e8f0fe; color:#1a73e8; padding:2px 10px; border-radius:9999px; font-size:.75rem; }

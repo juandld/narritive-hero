@@ -115,11 +115,14 @@ async def create_note(
             target_ext = 'wav'
     else:
         # Video inputs → convert audio track to AAC (m4a) for broad compatibility
-        source_ext = name_ext or 'mkv'
+        source_ext = (name_ext or 'mkv')
         target_ext = 'm4a'
         needs_transcode = True
 
-    ext = target_ext or source_ext or 'm4a'
+    ext = (target_ext or source_ext or 'm4a')
+    ext = (ext or 'm4a').lower()
+    source_ext = (source_ext or '').lower()
+    source_ext = source_ext or None
     logging.info(
         "Incoming note upload: original_name=%s content_type=%s source_ext=%s -> target_ext=%s (transcode=%s)",
         orig_name,
@@ -128,6 +131,28 @@ async def create_note(
         ext,
         needs_transcode,
     )
+    stored_mime = {
+        'm4a': 'audio/mp4',
+        'mp3': 'audio/mpeg',
+        'wav': 'audio/wav',
+        'ogg': 'audio/ogg',
+        'webm': 'audio/webm',
+    }.get(ext, f"audio/{ext}")
+    metadata_fields = {
+        "audio_format": ext,
+        "stored_mime": stored_mime,
+        "original_format": source_ext or ext,
+        "transcoded": bool(needs_transcode),
+    }
+    if needs_transcode and source_ext and source_ext != ext:
+        metadata_fields["transcoded_from"] = source_ext
+    if ct:
+        metadata_fields["content_type"] = ct
+    if needs_transcode:
+        if ext == 'm4a':
+            metadata_fields["sample_rate_hz"] = 44100
+        elif ext == 'wav':
+            metadata_fields["sample_rate_hz"] = 16000
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{uuid.uuid4().hex[:6]}.{ext}"
     file_path = os.path.join(VOICE_NOTES_DIR, filename)
@@ -141,7 +166,7 @@ async def create_note(
         try:
             cmd = ['ffmpeg', '-y', '-i', tmp_path]
             if ext == 'm4a':
-                cmd += ['-vn', '-ac', '1', '-ar', '44100', '-c:a', 'aac', '-b:a', '128k', file_path]
+                cmd += ['-vn', '-ac', '1', '-ar', '44100', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', file_path]
             elif ext == 'wav':
                 cmd += ['-vn', '-ac', '1', '-ar', '16000', file_path]
             else:
@@ -173,7 +198,7 @@ async def create_note(
         base_filename = os.path.splitext(filename)[0]
         import note_store as _ns
         # Minimal payload: use base as a placeholder title, empty transcription
-        payload_min = _ns.build_note_payload(filename, base_filename, "")
+        payload_min = _ns.build_note_payload(filename, base_filename, "", metadata_fields)
         if folder:
             payload_min["folder"] = (folder or "").strip()
         _ns.save_note_json(base_filename, payload_min)
@@ -471,7 +496,25 @@ async def update_folder(filename: str, payload: FolderUpdate):
                         break
             import note_store as _ns
             # Use base as title, empty transcription (will be filled when background task runs)
-            payload_min = _ns.build_note_payload(filename, base_filename, "")
+            audio_ext = os.path.splitext(filename)[1].lstrip('.').lower() or 'wav'
+            stored_mime = {
+                'm4a': 'audio/mp4',
+                'mp3': 'audio/mpeg',
+                'wav': 'audio/wav',
+                'ogg': 'audio/ogg',
+                'webm': 'audio/webm',
+            }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+            metadata_fields = {
+                "audio_format": audio_ext,
+                "stored_mime": stored_mime,
+                "original_format": audio_ext,
+                "transcoded": False,
+            }
+            if audio_ext == 'm4a':
+                metadata_fields["sample_rate_hz"] = 44100
+            elif audio_ext == 'wav':
+                metadata_fields["sample_rate_hz"] = 16000
+            payload_min = _ns.build_note_payload(filename, base_filename, "", metadata_fields)
             _ns.save_note_json(base_filename, payload_min)
         except Exception:
             return Response(status_code=404)
