@@ -32,6 +32,8 @@ TRANSCRIPTS_DIR = os.path.join(STORAGE_DIR, "transcriptions")
 NARRATIVES_DIR = os.path.join(STORAGE_DIR, "narratives")
 FORMATS_DIR = os.path.join(STORAGE_DIR, "formats")
 FOLDERS_DIR = os.path.join(STORAGE_DIR, "folders")
+PROGRAMS_DIR = os.path.join(STORAGE_DIR, "programs")
+N8N_WEBHOOK_TOKEN = (os.getenv("N8N_WEBHOOK_TOKEN") or "").strip() or None
 
 # Models and providers
 def _normalize_google_model(name: str) -> str:

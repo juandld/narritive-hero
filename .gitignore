@@ -39,6 +39,16 @@ __pycache__/
 
 # Python virtual env files
 venv/
+.venv/
+**/.venv/
+
+# Pytest artifacts
+.pytest_cache/
+**/.pytest_cache/
+.pytest_tmp/
+**/.pytest_tmp/
+.tmp/
+**/.tmp/
 
 # svelte build files
 frontend/.svelte-kit/

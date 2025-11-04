@@ -312,6 +312,10 @@ def get_notes():
             "language": data.get("language", "und"),
             "folder": data.get("folder", ""),
             "tags": data.get("tags", []),
+            "auto_category": data.get("auto_category"),
+            "auto_category_confidence": data.get("auto_category_confidence"),
+            "auto_program": data.get("auto_program"),
+            "auto_program_confidence": data.get("auto_program_confidence"),
         })
 
     # Second: text-only notes (JSONs with no matching audio base)
@@ -345,6 +349,10 @@ def get_notes():
                 "language": data.get("language", "und"),
                 "folder": data.get("folder", ""),
                 "tags": data.get("tags", []),
+                "auto_category": data.get("auto_category"),
+                "auto_category_confidence": data.get("auto_category_confidence"),
+                "auto_program": data.get("auto_program"),
+                "auto_program_confidence": data.get("auto_program_confidence"),
             })
         except Exception:
             continue

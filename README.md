@@ -1,6 +1,16 @@
 # Narrative Hero
 
-A web app to capture voice notes and turn them into organized, searchable narratives. Notes are automatically transcribed and titled (Gemini via LangChain, with OpenAI fallbacks), stored as lightweight JSON, and can be combined into narratives or used to generate new ones with an LLM.
+Narrative Hero delivers frictionless voice capture that quickly becomes organized, narrative-ready knowledge. Audio or text notes flow through a resilient transcription pipeline, get stored as auditable JSON, and can be stitched into narratives or used to generate new insights with an LLM. The north-star guidance that keeps every contributor aligned lives in [`development/north-star.md`](development/north-star.md); consult it whenever the product direction or tone is in question.
+
+## North Star Snapshot
+
+- **Mission**: let users “just talk” while the system transparently captures, transcribes, titles, and organizes every idea.
+- **Pillars**:
+  - Capture: trustworthy in-browser recording and flexible uploads (audio/video) with immediate feedback.
+  - Transcribe & Title: Gemini 2.5 Flash (key rotation) with OpenAI fallbacks via LangChain.
+  - Organize: JSON-first storage with folders, tags, generated topics, and language inference.
+  - Feedback Loop: empathetic integrations (e.g., Telegram webhook) that echo back status, categorization, and summaries.
+- **Active focus**: intelligent categorization, human-in-the-loop Telegram experience, and resilient observability (see [`development/project-status.md`](development/project-status.md)).
 
 ## Quick Start (TL;DR)
 
@@ -15,17 +25,18 @@ A web app to capture voice notes and turn them into organized, searchable narrat
 - Expand/collapse text: click the ▼/▲ toggle within a note card. You can also switch views (List/Compact/Grid) from the Topbar.
 - API docs: FastAPI Swagger UI is available at `http://localhost:8000/docs`.
 
-## Features
+## Features (Aligned with the North Star)
 
-- Voice capture and uploads: record in-browser or upload `.wav`, `.mp3`, `.ogg`, `.webm`, `.m4a`; video files like `.mkv`/`.mp4` are accepted and converted to audio automatically
-- Auto transcription and titles: Gemini 2.5 Flash via LangChain (key rotation)
-- Resilient providers: rotate multiple Gemini keys and fallback to OpenAI Whisper/Chat
-- JSON metadata per note: title, transcription, date, duration, topics, tags
-- Filtering & search: by date range, topics, duration, and free-text query
-- Tags: add your own color-coded tags (with last-used color remembered)
-- Bulk actions: delete selected notes, create narratives from selection
-- Narratives: list, open, delete, assign folders; generate or iterate with formats
-- Cross-device audio: WebM/Ogg/video recordings are normalized to AAC `.m4a` so notes play back on iOS/Safari; note cards display the stored format so you can verify conversions (FFmpeg handles this automatically; Docker images already include it).
+- **Capture**: record in-browser with a live waveform, drag-drop uploads for `.wav/.mp3/.ogg/.webm/.m4a`, and automatic audio extraction for video (`.mkv/.mp4`). FFmpeg-backed normalization produces AAC `.m4a` for cross-device playback.
+- **Transcribe & Title**: background workers call Gemini 2.5 Flash (key rotation) with OpenAI Whisper/Chat fallbacks, generating titles, summaries, and metadata without blocking the UI.
+- **Organize**: each note stores JSON metadata (date, duration, topics, tags, folders, language). Frontend filters, tag chips, and bulk actions let you curate and stitch selected notes into narratives.
+- **Feedback Loop**: Telegram/n8n webhook (`/api/integrations/telegram`) accepts voice or text, returns empathetic status updates (saved folder, tags, summary), and keeps humans in the loop while categorization intelligence matures.
+
+## Active Initiatives
+
+- **Intelligent categorization**: auto-assign folders/tags with explainable reasoning while honoring existing taxonomies; surface the decision so humans can correct it.
+- **Human-in-the-loop Telegram experience**: refine webhook responses (`status`, `summary`, `folder`, `tags`) so automations feel like a responsive teammate.
+- **Resilience & observability**: maintain Gemini→OpenAI failover, log key decisions, and expand smoke/integration tests. Track progress in [`development/project-status.md`](development/project-status.md).
 
 ## How It Works
 
@@ -246,6 +257,7 @@ Backend reads from `backend/.env`. Compose now also loads the repo root `.env` f
 - `OPENAI_NARRATIVE_MODEL` — default `gpt-4o`
 - `ALLOWED_ORIGINS` — comma‑separated list of frontend origins for CORS (e.g., `https://app.example.com,https://www.example.com`). Can be set in `backend/.env` or root `.env`.
 - `ALLOWED_ORIGIN`, `ALLOWED_ORIGIN_1..N` — optional individual CORS entries (take precedence over `ALLOWED_ORIGINS`).
+- `CLOUDFLARE_TUNNEL_TOKEN` — optional. When set, the `cloudflared` service in `docker compose` automatically runs your Cloudflare Tunnel (`tunnel --no-autoupdate run --token …`). Keep this value out of version control (set it in your `.env`).
 
 Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (uses `VITE_BACKEND_URL` at build, or computes `http(s)://<current-host>:8000` at runtime if unset).
 You can set `VITE_BACKEND_URL` at build time to point the frontend at your API (e.g., `https://api.example.com`).

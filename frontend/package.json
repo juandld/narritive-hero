@@ -23,5 +23,8 @@
   "type": "module",
   "overrides": {
     "@sveltejs/vite-plugin-svelte": "^4.0.0-next.6"
+  },
+  "dependencies": {
+    "svelte-audio-waveform": "^0.0.5"
   }
 }

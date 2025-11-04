@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { BACKEND_URL } from '../config';
+  import AudioWaveform from 'svelte-audio-waveform';
 
   export let open: boolean = false;
   export let currentContent: string = '';
@@ -34,6 +35,20 @@
   let newNoteFilename: string | null = null;
   let polling = false;
   let pollError: string = '';
+  let mounted = false;
+
+  // Live waveform visualization while recording
+  const DEFAULT_WAVE_SAMPLES = 120;
+  const WAVEFORM_HEIGHT = 84;
+  let waveformPeaks: number[] = Array(DEFAULT_WAVE_SAMPLES).fill(0);
+  let waveformAnimation: number | null = null;
+  let audioContext: AudioContext | null = null;
+  let analyser: AnalyserNode | null = null;
+  let waveformDataArray: Uint8Array | null = null;
+  let mediaStream: MediaStream | null = null;
+  let mediaStreamSource: MediaStreamAudioSourceNode | null = null;
+  let waveformContainer: HTMLDivElement | null = null;
+  let waveformWidth = 320;
 
   // Selection scope for how to use the excerpt
   type Scope = 'whole' | 'focus' | 'section';
@@ -59,6 +74,7 @@
   }
 
   onMount(() => {
+    mounted = true;
     if (open) fetchNotes();
   });
 
@@ -67,27 +83,108 @@
     fetchNotes();
   }
 
+  $: waveformWidth = waveformContainer?.clientWidth || 320;
+
   function close() {
     if (uploading || polling || isRecording) return;
     dispatch('close');
   }
 
+  function stopVisualizer() {
+    if (waveformAnimation !== null) {
+      cancelAnimationFrame(waveformAnimation);
+      waveformAnimation = null;
+    }
+    if (mediaStreamSource) {
+      try {
+        mediaStreamSource.disconnect();
+      } catch (err) {
+        console.debug('visualizer disconnect error', err);
+      }
+      mediaStreamSource = null;
+    }
+    if (audioContext) {
+      const ctx = audioContext;
+      audioContext = null;
+      ctx.close().catch(() => {});
+    }
+    analyser = null;
+    waveformDataArray = null;
+    waveformPeaks = Array(DEFAULT_WAVE_SAMPLES).fill(0);
+  }
+
+  function clearStream() {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch (err) {
+          console.debug('stream stop error', err);
+        }
+      });
+      mediaStream = null;
+    }
+  }
+
+  function startVisualizer(stream: MediaStream) {
+    stopVisualizer();
+    try {
+      if (typeof window === 'undefined') return;
+      const Ctx = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
+      audioContext = new Ctx();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      waveformDataArray = new Uint8Array(analyser.fftSize);
+      mediaStreamSource = audioContext.createMediaStreamSource(stream);
+      mediaStreamSource.connect(analyser);
+      waveformPeaks = Array(DEFAULT_WAVE_SAMPLES).fill(0);
+
+      const tick = () => {
+        if (!analyser || !waveformDataArray) return;
+        analyser.getByteTimeDomainData(waveformDataArray);
+        let sum = 0;
+        for (let i = 0; i < waveformDataArray.length; i++) {
+          const deviation = waveformDataArray[i] - 128;
+          sum += Math.abs(deviation);
+        }
+        const amplitude = Math.min(1, sum / (waveformDataArray.length * 128));
+        waveformPeaks = [...waveformPeaks.slice(1), amplitude];
+        waveformAnimation = requestAnimationFrame(tick);
+      };
+      waveformAnimation = requestAnimationFrame(tick);
+    } catch (err) {
+      console.error('visualizer init error', err);
+      stopVisualizer();
+    }
+  }
+
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStream = stream;
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
       mediaRecorder.onstop = async () => {
+        isRecording = false;
         const mime = (mediaRecorder && (mediaRecorder as any).mimeType) || (audioChunks[0] && (audioChunks[0] as any).type) || 'audio/webm';
         const blob = new Blob(audioChunks, { type: mime });
         audioChunks = [];
+        stopVisualizer();
+        clearStream();
+        mediaRecorder = null;
         await uploadRecording(blob);
       };
+      audioChunks = [];
       mediaRecorder.start();
       isRecording = true;
+      startVisualizer(stream);
     } catch (e) {
       console.error('mic error', e);
       alert('Mic permission denied or unavailable.');
+      mediaRecorder = null;
+      mediaStream = null;
+      stopVisualizer();
+      clearStream();
     }
   }
 
@@ -96,6 +193,8 @@
       mediaRecorder.stop();
       isRecording = false;
     }
+    stopVisualizer();
+    clearStream();
   }
 
   async function uploadRecording(blob: Blob) {
@@ -223,6 +322,11 @@
       dispatch('finish');
     }
   }
+
+  onDestroy(() => {
+    stopVisualizer();
+    clearStream();
+  });
 </script>
 
 {#if open}
@@ -302,11 +406,33 @@
         </div>
       {:else}
         <div class="section">
-          {#if !isRecording}
-            <button class="btn primary" on:click={startRecording} disabled={uploading || polling}>Start recording</button>
-          {:else}
-            <button class="btn danger" on:click={stopRecording}>Stop recording</button>
-          {/if}
+          <div class="recording-controls">
+            {#if !isRecording}
+              <button class="btn primary" on:click={startRecording} disabled={uploading || polling}>Start recording</button>
+            {:else}
+              <button class="btn danger" on:click={stopRecording}>Stop recording</button>
+            {/if}
+            <div class={`recording-indicator ${isRecording ? 'live' : ''}`}>
+              <span class="dot"></span>
+              <span>{isRecording ? 'Recording…' : 'Standby'}</span>
+            </div>
+          </div>
+          <div class={`waveform-panel ${isRecording ? 'active' : ''}`} bind:this={waveformContainer}>
+            {#if mounted}
+              <AudioWaveform
+                peaks={waveformPeaks}
+                position={1}
+                height={WAVEFORM_HEIGHT}
+                width={Math.max(120, waveformWidth)}
+                color="#d1d5db"
+                progressColor={isRecording ? '#ef4444' : '#6b7280'}
+                barWidth={2}
+              />
+            {/if}
+            <div class="waveform-overlay">
+              <span>{isRecording ? 'We are listening. Speak freely.' : 'Press start to begin recording.'}</span>
+            </div>
+          </div>
           {#if uploading}
             <div class="status">Uploading…</div>
           {/if}
@@ -358,6 +484,16 @@
   .error { color: #b91c1c; font-size: .9rem; }
   .error.inline { margin-top: .5rem; }
   .ok { color: #065f46; font-size: .9rem; }
+  .recording-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .recording-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .9rem; color: #6b7280; transition: color .2s ease-in-out; }
+  .recording-indicator .dot { width: .6rem; height: .6rem; border-radius: 999px; background: #9ca3af; display: inline-block; }
+  .recording-indicator.live { color: #ef4444; font-weight: 500; }
+  .recording-indicator.live .dot { background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,0.16); animation: pulse 1.5s ease-in-out infinite; }
+  .waveform-panel { position: relative; width: 100%; min-height: 96px; background: #f9fafb; border: 1px dashed #d1d5db; border-radius: 8px; overflow: hidden; }
+  .waveform-panel.active { border-style: solid; border-color: #ef4444; background: #fff4f4; }
+  .waveform-overlay { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; pointer-events: none; font-size: .85rem; color: #6b7280; text-align: center; padding: 0 .75rem; }
+  .waveform-panel.active .waveform-overlay { color: #b91c1c; font-weight: 500; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.3); } 70% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
   .hint { color: #6b7280; margin: 0; }
   h3 { margin: 0; }
   .formats-list { display:flex; flex-direction: column; gap:.25rem; max-height: 180px; overflow:auto; border:1px solid #e5e7eb; border-radius:6px; padding:.5rem; }

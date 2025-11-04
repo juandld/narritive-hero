@@ -9,7 +9,7 @@ are created lazily inside function bodies rather than at module import time.
 from __future__ import annotations
 
 import io
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import logging
 from langchain_core.messages import HumanMessage
@@ -24,7 +24,7 @@ logger = logging.getLogger("narrative.providers")
 GOOGLE_KEYS = config.collect_google_api_keys()
 
 # Lazy cache for constructed Gemini clients keyed by model
-_GOOGLE_LLMS_CACHE: dict[str, List[object]] = {}
+_GOOGLE_LLMS_CACHE: Dict[str, List[object]] = {}
 
 def _get_google_llms(model: Optional[str] = None) -> List[object]:
     """Build or fetch cached Gemini clients for the given model lazily.
@@ -74,7 +74,7 @@ def key_label_from_index(index: int) -> str:
     return f"gemini_key_{index}_{key[-4:] if key else '????'}"
 
 
-def invoke_google(messages: List[HumanMessage], model: str | None = None) -> Tuple[object, int]:
+def invoke_google(messages: List[HumanMessage], model: Optional[str] = None) -> Tuple[object, int]:
     """Try Gemini clients in order (no internal retries). Returns (response, key_index).
 
     If `model` is provided, use a transient set of clients for that model.
@@ -113,7 +113,7 @@ def title_with_openai(text: str) -> str:
     return normalize_title_output(raw)
 
 
-def openai_chat(messages: list[HumanMessage], model: str | None = None, temperature: float = 0.2) -> str:
+def openai_chat(messages: List[HumanMessage], model: Optional[str] = None, temperature: float = 0.2) -> str:
     """Generic OpenAI chat wrapper returning content text."""
     if not config.OPENAI_API_KEY:
         raise RuntimeError("OpenAI fallback not configured.")

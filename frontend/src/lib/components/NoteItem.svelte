@@ -159,6 +159,11 @@
   // Audio state for styling
   let isLoaded = false;
   let isPlaying = false;
+
+  function formatConfidence(value?: number | null): string {
+    if (value === null || value === undefined || Number.isNaN(value)) return 'n/a';
+    return `${Math.round(value * 100)}%`;
+  }
 </script>
 
 <li draggable="true" on:dragstart={(e)=>{
@@ -192,6 +197,16 @@
       {/if}
       {#if note.language}
         <span class="badge lang" title="Language">{note.language}</span>
+      {/if}
+      {#if note.auto_category}
+        <span class="badge category" title={`Auto category • conf ${formatConfidence(note.auto_category_confidence)}`}>
+          {note.auto_category}
+        </span>
+      {/if}
+      {#if note.auto_program}
+        <span class="badge program" title={`Auto program • conf ${formatConfidence(note.auto_program_confidence)}`}>
+          {note.auto_program}
+        </span>
       {/if}
       <button class="mini" title="Edit tags" aria-label="Edit tags" on:click|stopPropagation={() => (showTagEditor = !showTagEditor)}>
         🏷️
@@ -281,6 +296,8 @@
   .badge { font-size:.7rem; background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:9999px; }
   .badge.lang { background:#e8f0fe; color:#1a73e8; }
   .badge.format { background:#ecfdf5; color:#047857; }
+  .badge.category { background:#fef3c7; color:#b45309; text-transform: capitalize; }
+  .badge.program { background:#f3e8ff; color:#7c3aed; }
   .mini { border:1px solid #e5e7eb; background:#fff; color:#374151; border-radius:6px; padding:.15rem .4rem; cursor:pointer; font-size:.85rem; }
   .chips { margin: .25rem 0 .5rem 0; display:flex; gap:.35rem; flex-wrap: wrap; }
   .topic { background:#e8f0fe; color:#1a73e8; padding:2px 10px; border-radius:9999px; font-size:.75rem; }

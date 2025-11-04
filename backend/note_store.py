@@ -11,7 +11,7 @@ import os
 import wave
 import contextlib
 from datetime import datetime
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional, List
 
 import config
 
@@ -43,7 +43,7 @@ STOPWORDS = set(
     "the a an and or but for with without on in at to from of by this that those these is are was were be been being i you he she it we they them me my your our their as not just into over under again more most some any few many much very can could should would".split()
 )
 
-def infer_language(text: str | None, title: str | None = None) -> str:
+def infer_language(text: Optional[str], title: Optional[str] = None) -> str:
     """Very lightweight language inference.
 
     - Detects scripts (CJK, Cyrillic, Arabic, Hebrew, Devanagari) by Unicode ranges
@@ -100,7 +100,7 @@ def infer_language(text: str | None, title: str | None = None) -> str:
     return best[0] if best[1] > 0 else 'und'
 
 
-def infer_topics(text: str | None, title: str | None) -> list[str]:
+def infer_topics(text: Optional[str], title: Optional[str]) -> List[str]:
     source = (title or "").strip() or (text or "").strip()
     if not source:
         return []
@@ -148,7 +148,7 @@ def build_note_payload(audio_filename: str, title: str, transcription: str, meta
     return payload
 
 
-def load_note_json(base_filename: str) -> Tuple[dict | None, str | None, str | None]:
+def load_note_json(base_filename: str) -> Tuple[Optional[dict], Optional[str], Optional[str]]:
     """Return (data, transcription, title) from JSON if exists, else (None, None, None)."""
     path = note_json_path(base_filename)
     if not os.path.exists(path):

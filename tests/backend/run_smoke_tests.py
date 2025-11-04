@@ -9,10 +9,12 @@ def setup_temp_dirs():
     voice = os.path.join(base, "voice_notes")
     trans = os.path.join(base, "transcriptions")
     narr = os.path.join(base, "narratives")
+    programs = os.path.join(base, "programs")
     os.makedirs(voice, exist_ok=True)
     os.makedirs(trans, exist_ok=True)
     os.makedirs(narr, exist_ok=True)
-    return types.SimpleNamespace(base=base, voice=voice, trans=trans, narr=narr)
+    os.makedirs(programs, exist_ok=True)
+    return types.SimpleNamespace(base=base, voice=voice, trans=trans, narr=narr, programs=programs)
 
 
 def install_stubs():
@@ -83,6 +85,7 @@ def patch_paths(tmp):
     for mod, attr, val in [
         (config, "VOICE_NOTES_DIR", tmp.voice),
         (config, "TRANSCRIPTS_DIR", tmp.trans),
+        (config, "PROGRAMS_DIR", tmp.programs),
         (services, "VOICE_NOTES_DIR", tmp.voice),
         (services, "TRANSCRIPTS_DIR", tmp.trans),
         (utils, "VOICE_NOTES_DIR", tmp.voice),
@@ -94,6 +97,7 @@ def patch_paths(tmp):
             ("VOICE_NOTES_DIR", tmp.voice),
             ("TRANSCRIPTS_DIR", tmp.trans),
             ("NARRATIVES_DIR", tmp.narr),
+            ("PROGRAMS_DIR", tmp.programs),
         ):
             setattr(main, attr, val)
 
