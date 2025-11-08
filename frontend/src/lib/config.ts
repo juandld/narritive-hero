@@ -4,8 +4,6 @@
 // 2) Runtime:
 //    - If on localhost:5173 (dev), default to http://localhost:8000
 //    - Otherwise, same-origin without explicit port (80/443 fallback)
-const env = (import.meta as any)?.env || {};
-
 function computeRuntimeBackend(): string {
   try {
     if (typeof window !== 'undefined' && window.location) {
@@ -22,4 +20,6 @@ function computeRuntimeBackend(): string {
   return 'http://localhost:8000';
 }
 
-export const BACKEND_URL: string = env.VITE_BACKEND_URL || computeRuntimeBackend();
+import { env as publicEnv } from '$env/dynamic/public';
+
+export const BACKEND_URL: string = publicEnv.PUBLIC_BACKEND_URL || computeRuntimeBackend();

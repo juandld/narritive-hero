@@ -3,8 +3,8 @@ FROM node:18-alpine as build
 
 WORKDIR /app
 
-ARG VITE_BACKEND_URL
-ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
+ARG PUBLIC_BACKEND_URL
+ENV PUBLIC_BACKEND_URL=${PUBLIC_BACKEND_URL}
 
 COPY package.json package-lock.json* ./
 RUN npm install
