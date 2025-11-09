@@ -33,7 +33,9 @@ NARRATIVES_DIR = os.path.join(STORAGE_DIR, "narratives")
 FORMATS_DIR = os.path.join(STORAGE_DIR, "formats")
 FOLDERS_DIR = os.path.join(STORAGE_DIR, "folders")
 PROGRAMS_DIR = os.path.join(STORAGE_DIR, "programs")
-N8N_WEBHOOK_TOKEN = (os.getenv("N8N_WEBHOOK_TOKEN") or "").strip() or None
+TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip() or None
+TELEGRAM_WEBHOOK_SECRET = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip() or None
+TELEGRAM_INGEST_TOKEN = (os.getenv("TELEGRAM_INGEST_TOKEN") or "").strip() or None
 
 # Models and providers
 def _normalize_google_model(name: str) -> str:
@@ -109,3 +111,16 @@ def _collect_allowed_origins() -> list[str]:
 
 # Allowed frontend origins for CORS
 ALLOWED_ORIGINS = _collect_allowed_origins()
+
+
+def _parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if not normalized:
+        return default
+    return normalized in {"1", "true", "yes", "on"}
+
+
+LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
+LOG_JSON = _parse_bool(os.getenv("LOG_JSON"))

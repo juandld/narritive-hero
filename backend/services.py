@@ -264,35 +264,41 @@ def get_notes():
         audio_path = os.path.join(VOICE_NOTES_DIR, filename)
         data, transcription, title = note_store.load_note_json(base_filename)
         if data is None:
-            # JSON not yet created (transcription pending). Return lightweight metadata
-            mtime = os.path.getmtime(audio_path)
-            date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-            length_sec = note_store.audio_length_seconds(audio_path)
-            audio_ext = os.path.splitext(filename)[1].lstrip('.').lower() or 'wav'
-            stored_mime = {
-                'm4a': 'audio/mp4',
-                'mp3': 'audio/mpeg',
-                'wav': 'audio/wav',
-                'ogg': 'audio/ogg',
-                'webm': 'audio/webm',
-            }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
-            notes.append({
-                "filename": filename,
-                "transcription": transcription,  # likely None
-                "title": (title or base_filename),
-                "date": date_str,
-                "created_at": __import__('datetime').datetime.fromtimestamp(mtime).isoformat(),
-                "created_ts": int(mtime * 1000),
-                "length_seconds": length_sec,
-                "topics": [],
-                "folder": "",
-                "tags": [],
-                "audio_format": audio_ext,
-                "stored_mime": stored_mime,
-                "original_format": audio_ext,
-                "transcoded": False,
-            })
-            continue
+            try:
+                placeholder = note_store.ensure_placeholder_note(filename)
+                data = placeholder
+                transcription = placeholder.get("transcription")
+                title = placeholder.get("title")
+            except Exception:
+                # Fallback to a lightweight entry without saving if placeholder creation fails
+                mtime = os.path.getmtime(audio_path)
+                date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+                length_sec = note_store.audio_length_seconds(audio_path)
+                audio_ext = os.path.splitext(filename)[1].lstrip('.').lower() or 'wav'
+                stored_mime = {
+                    'm4a': 'audio/mp4',
+                    'mp3': 'audio/mpeg',
+                    'wav': 'audio/wav',
+                    'ogg': 'audio/ogg',
+                    'webm': 'audio/webm',
+                }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+                notes.append({
+                    "filename": filename,
+                    "transcription": transcription,  # likely None
+                    "title": (title or base_filename),
+                    "date": date_str,
+                    "created_at": __import__('datetime').datetime.fromtimestamp(mtime).isoformat(),
+                    "created_ts": int(mtime * 1000),
+                    "length_seconds": length_sec,
+                    "topics": [],
+                    "folder": "",
+                    "tags": [],
+                    "audio_format": audio_ext,
+                    "stored_mime": stored_mime,
+                    "original_format": audio_ext,
+                    "transcoded": False,
+                })
+                continue
         else:
             data = note_store.ensure_metadata_in_json(base_filename, data)
 

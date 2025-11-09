@@ -2,6 +2,7 @@ import { appActions } from '$lib/services/appActions';
 import { notes as notesStore } from '$lib/stores/notes';
 import { folders as foldersStore, selectedFolder as selectedFolderStore } from '$lib/stores/folders';
 import { dbg } from '$lib/debug';
+import { get } from 'svelte/store';
 
 async function refreshAll() {
   const { notes, folders } = await appActions.fetchNotesAndFolders();
@@ -26,17 +27,18 @@ export async function uploadBlob(blob: Blob, skipPoll = false) {
   }
   const start = Date.now();
   const timeoutMs = 60_000; // 1 min cap
-  const poll = async (): Promise<void> => {
+  const poll = async (delay = 2500): Promise<void> => {
     await refreshAll();
-    const notes = (await new Promise<any>((resolve) => notesStore.subscribe((v) => resolve(v))())) as any[];
+    const notes = (get(notesStore) || []) as any[];
     const note = notes.find((n) => n.filename === filename);
     if (note && note.transcription) {
       return;
     }
     if (Date.now() - start > timeoutMs) return;
-    setTimeout(poll, 2000);
+    const nextDelay = Math.min(delay * 1.5, 8000);
+    setTimeout(() => { poll(nextDelay); }, nextDelay);
   };
-  await poll();
+  await poll(2500);
 }
 
 export async function handleFiles(files: File[]) {
@@ -46,9 +48,12 @@ export async function handleFiles(files: File[]) {
   // open a short polling window
   const started = Date.now();
   const end = started + 30_000;
-  const loop = async () => {
+  const loop = async (delay = 2500) => {
     await refreshAll();
-    if (Date.now() < end) setTimeout(loop, 2000);
+    if (Date.now() < end) {
+      const nextDelay = Math.min(delay * 1.5, 8000);
+      setTimeout(() => { loop(nextDelay); }, nextDelay);
+    }
   };
-  setTimeout(loop, 0);
+  setTimeout(() => { loop(2500); }, 0);
 }

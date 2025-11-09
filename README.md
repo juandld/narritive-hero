@@ -30,13 +30,18 @@ Narrative Hero delivers frictionless voice capture that quickly becomes organize
 - **Capture**: record in-browser with a live waveform, drag-drop uploads for `.wav/.mp3/.ogg/.webm/.m4a`, and automatic audio extraction for video (`.mkv/.mp4`). FFmpeg-backed normalization produces AAC `.m4a` for cross-device playback.
 - **Transcribe & Title**: background workers call Gemini 2.5 Flash (key rotation) with OpenAI Whisper/Chat fallbacks, generating titles, summaries, and metadata without blocking the UI.
 - **Organize**: each note stores JSON metadata (date, duration, topics, tags, folders, language). Frontend filters, tag chips, and bulk actions let you curate and stitch selected notes into narratives.
-- **Feedback Loop**: Telegram/n8n webhook (`/api/integrations/telegram`) accepts voice or text, returns empathetic status updates (saved folder, tags, summary), and keeps humans in the loop while categorization intelligence matures.
+- **Feedback Loop**: Direct Telegram webhook (`/api/integrations/telegram`) accepts voice or text, returns empathetic status updates (saved folder, tags, summary), and keeps humans in the loop while categorization intelligence matures.
 
 ## Active Initiatives
 
-- **Intelligent categorization**: auto-assign folders/tags with explainable reasoning while honoring existing taxonomies; surface the decision so humans can correct it.
-- **Human-in-the-loop Telegram experience**: refine webhook responses (`status`, `summary`, `folder`, `tags`) so automations feel like a responsive teammate.
-- **Resilience & observability**: maintain Gemini→OpenAI failover, log key decisions, and expand smoke/integration tests. Track progress in [`development/project-status.md`](development/project-status.md).
+- **Intelligent categorization**: ship an auto-assignment service that respects the current folder taxonomy, explains its choices, and falls back to `Inbox` when uncertain. Every decision should be visible in webhook/UI responses and logged for later review.
+- **Program registry alignment**: maintain a single source of truth for ongoing initiatives so categorization and agents share the same vocabulary. Keep the registry lightweight (JSON/config) and in sync with automation workflows.
+- **Human-in-the-loop Telegram experience**: refine `/api/integrations/telegram` responses so Telegram chat users receive empathetic, structured feedback (`status`, `summary`, `folder`, `tags`) while keeping multipart + JSON compatibility for future automations.
+- **Testing & observability depth**: expand beyond the smoke suite—restore full pytest coverage, add deterministic Telegram audio tests, and improve telemetry so categorization, summaries, and fallbacks are auditable. Track progress in [`development/project-status.md`](development/project-status.md).
+
+### Near-Term Roadmap Snapshot (Nov 2024)
+
+Week 1 focuses on deploying the categorizer with LLM + heuristic fallbacks wired into the webhook and background tasks. Week 2 emphasizes surfacing those categorization outcomes in the frontend with easy corrections that can feed future model tuning. Week 3 targets test depth—regression coverage for program assignments plus broader backend smoke and integration checks. Refer to [`development/project-status.md`](development/project-status.md) for the live status.
 
 ## How It Works
 
@@ -223,6 +228,19 @@ EXTERNAL_DEV_ORIGIN=https://dev.narrative.local:5173 \
 
 Point `dev.narrative.local` at your laptop (`/etc/hosts`), generate a trusted cert (e.g., with [`mkcert`](https://github.com/FiloSottile/mkcert)), and visit `https://dev.narrative.local:5173` from any device on the LAN. For a quick check without certificates, you can still bind to `http://<laptop-ip>:5173` (`EXTERNAL_DEV_ORIGIN=http://<ip>:5173`), but iOS will block microphone access until you serve over HTTPS.
 
+## Telegram Bot (Direct)
+
+- Set `TELEGRAM_BOT_TOKEN` in `backend/.env` (keep it out of version control). Optional: set `TELEGRAM_WEBHOOK_SECRET` for Telegram’s secret token header.
+- Optional: set `TELEGRAM_INGEST_TOKEN` when you want to call `/api/integrations/telegram` via custom scripts; include it as `X-Webhook-Token` or `token=` in the request.
+- Expose your backend at `https://<your-domain>/api/integrations/telegram/webhook` and point your bot there:
+  ```bash
+  curl -X POST "https://api.telegram.org/bot<token>/setWebhook" \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://<your-domain>/api/integrations/telegram/webhook", "secret_token": "<your-secret>"}'
+  ```
+- The webhook accepts text and voice/audio notes directly from Telegram, creates notes through the same pipeline as the app, and replies in-chat with status + summaries.
+- If a token is ever exposed publicly, revoke it with `@BotFather` (`/revoke`) and update `TELEGRAM_BOT_TOKEN`.
+
 ## Project Structure
 
 - `frontend/` SvelteKit app (components for filters, bulk actions, notes, etc.)
@@ -258,6 +276,9 @@ Backend reads from `backend/.env`. Compose now also loads the repo root `.env` f
 - `ALLOWED_ORIGINS` — comma‑separated list of frontend origins for CORS (e.g., `https://app.example.com,https://www.example.com`). Can be set in `backend/.env` or root `.env`.
 - `ALLOWED_ORIGIN`, `ALLOWED_ORIGIN_1..N` — optional individual CORS entries (take precedence over `ALLOWED_ORIGINS`).
 - `CLOUDFLARE_TUNNEL_TOKEN` — optional. When set, the `cloudflared` service in `docker compose` automatically runs your Cloudflare Tunnel (`tunnel --no-autoupdate run --token …`). Keep this value out of version control (set it in your `.env`).
+- `TELEGRAM_BOT_TOKEN` — optional. When set, the backend exposes a Telegram webhook endpoint so the bot can talk to Narrative Hero directly.
+- `TELEGRAM_WEBHOOK_SECRET` — optional. If set, Telegram must include this secret via the `X-Telegram-Bot-Api-Secret-Token` header when calling the webhook.
+- `TELEGRAM_INGEST_TOKEN` — optional. Shared secret for the HTTP ingest endpoint (`/api/integrations/telegram`) when calling it from custom automations.
 
 Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (uses `VITE_BACKEND_URL` at build, or computes `http(s)://<current-host>:8000` at runtime if unset).
 You can set `VITE_BACKEND_URL` at build time to point the frontend at your API (e.g., `https://api.example.com`).
@@ -563,6 +584,8 @@ Notes
 
 ## Contributing
 
+- Start by reading [`development/north-star.md`](development/north-star.md) and [`development/project-status.md`](development/project-status.md) so you understand the mission, current initiatives, and roadmap expectations.
+- For feature work that touches capture UX or Telegram, review `frontend/src/lib/components/NarrativeIterateModal.svelte` and the relevant helpers in `backend/main.py` (`_create_note_from_text_payload`, `_summarize_text_snippet`, `/api/integrations/telegram`) to stay aligned with the existing patterns.
 - Fork and clone the repo. The folder name is intentionally `narritive-hero`.
 - For local dev, run the backend and frontend as described in Quick Start.
 - Run backend tests: `bash tests/backend/test.sh` (falls back to smoke tests if pytest isn’t available).

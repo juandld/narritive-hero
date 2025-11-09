@@ -138,7 +138,7 @@ async def update_folder(filename: str, payload: FolderUpdate):
                 metadata_fields["sample_rate_hz"] = 44100
             elif audio_ext == "wav":
                 metadata_fields["sample_rate_hz"] = 16000
-            payload_min = build_note_payload(filename, base_filename, "", metadata_fields)
+            payload_min = build_note_payload(filename, base_filename, "", metadata_fields, include_length=False)
             with open(json_path, "w") as f:
                 json.dump(payload_min, f, ensure_ascii=False)
         except Exception:
