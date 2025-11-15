@@ -325,10 +325,16 @@ async def process_audio_upload(
 
     try:
         base_filename = os.path.splitext(filename)[0]
-        payload_min = _note_store.build_note_payload(filename, base_filename, "", metadata_fields)
+        payload_min = _note_store.build_note_payload(
+            filename, base_filename, "", metadata_fields, include_length=False
+        )
         if folder:
             payload_min["folder"] = (folder or "").strip()
         _note_store.save_note_json(base_filename, payload_min)
+        try:
+            _note_store.ensure_placeholder_note(filename)
+        except Exception:
+            pass
     except Exception:
         pass
 

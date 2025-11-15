@@ -8,3 +8,4 @@ pillow
 langchain-openai
 langchain-community
 pydub
+httpx

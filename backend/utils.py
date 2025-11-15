@@ -57,7 +57,7 @@ async def on_startup():
             wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
             # Create a minimal JSON immediately so a title is present in the UI
             try:
-                payload = _ns.build_note_payload(wav_file, base, "")
+                payload = _ns.build_note_payload(wav_file, base, "", include_length=False)
                 _ns.save_note_json(base, payload)
             except Exception:
                 pass

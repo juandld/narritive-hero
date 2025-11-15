@@ -118,14 +118,20 @@ def note_json_path(base_filename: str) -> str:
     return os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
 
 
-def build_note_payload(audio_filename: str, title: str, transcription: str, metadata: Optional[dict] = None) -> dict:
+def build_note_payload(
+    audio_filename: str,
+    title: str,
+    transcription: str,
+    metadata: Optional[dict] = None,
+    include_length: bool = True,
+) -> dict:
     """Build note JSON payload using the actual audio filename (with extension)."""
     audio_path = os.path.join(config.VOICE_NOTES_DIR, audio_filename)
     mtime = os.path.getmtime(audio_path) if os.path.exists(audio_path) else None
     date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d') if mtime else None
     created_ts = int(mtime * 1000) if mtime else int(datetime.now().timestamp() * 1000)
     created_at = datetime.fromtimestamp(mtime).isoformat() if mtime else datetime.now().isoformat()
-    length_sec = audio_length_seconds(audio_path) if mtime else None
+    length_sec = audio_length_seconds(audio_path) if (include_length and mtime) else None
     topics = infer_topics(transcription, title)
     language = infer_language(transcription, title)
     payload = {
@@ -224,8 +230,18 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
                 updated = True
             except Exception:
                 pass
-        if data.get("length_seconds") is None:
-            data["length_seconds"] = audio_length_seconds(audio_path)
+        length_val = data.get("length_seconds")
+        probe_attempted = data.get("_length_probe_attempted", False)
+        should_probe = (length_val is None or length_val == 0 or data.get("length_seconds_unknown")) and not probe_attempted
+        if should_probe:
+            computed = audio_length_seconds(audio_path)
+            data["_length_probe_attempted"] = True
+            if computed is None:
+                data["length_seconds"] = 0
+                data["length_seconds_unknown"] = True
+            else:
+                data["length_seconds"] = computed
+                data.pop("length_seconds_unknown", None)
             updated = True
     # If still no date and JSON exists, use JSON file mtime as a fallback (e.g., text-only notes)
     if not data.get("date") and os.path.exists(jp):
@@ -267,3 +283,48 @@ def save_note_json(base_filename: str, payload: dict) -> None:
     os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
     with open(note_json_path(base_filename), 'w') as jf:
         json.dump(payload, jf, ensure_ascii=False)
+
+
+def ensure_placeholder_note(audio_filename: str, base_payload: Optional[dict] = None) -> dict:
+    """
+    Create a lightweight JSON entry for an audio file if one does not exist.
+
+    Stores the core metadata (date, created_ts, audio length) so subsequent list
+    calls avoid repeating expensive ffmpeg probes while the transcription worker
+    catches up.
+    """
+    base = os.path.splitext(audio_filename)[0]
+    existing, _, _ = load_note_json(base)
+    base_payload_data = build_note_payload(audio_filename, base, "", include_length=False)
+
+    if isinstance(existing, dict):
+        payload = existing
+        for key, value in base_payload_data.items():
+            current = payload.get(key)
+            if current in (None, "", [], {}) and value not in (None, "", [], {}):
+                payload[key] = value
+    else:
+        payload = base_payload_data
+
+    payload["title"] = (payload.get("title") or base).strip() or base
+    payload["transcription"] = payload.get("transcription") or ""
+    payload.setdefault("transcription_status", "pending")
+
+    if payload.get("length_seconds") is None or payload.get("length_seconds") == 0:
+        payload["length_seconds"] = payload.get("length_seconds") or 0
+        payload["length_seconds_unknown"] = True
+        payload["_length_probe_attempted"] = True
+    else:
+        payload.pop("length_seconds_unknown", None)
+        payload["_length_probe_attempted"] = True
+
+    if isinstance(base_payload, dict):
+        for key, value in base_payload.items():
+            if value is None:
+                continue
+            current = payload.get(key)
+            if current in (None, "", [], {}):
+                payload[key] = value
+
+    save_note_json(base, payload)
+    return payload

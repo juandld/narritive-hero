@@ -14,7 +14,7 @@
 - **Capture**: Record in-browser or upload audio/video (`.wav/.mp3/.ogg/.webm/.m4a/.mp4`). Frontend shows a live waveform and recording indicator (`svelte-audio-waveform`) so users know we are listening.
 - **Transcribe & Title**: Background FastAPI job using Gemini 2.5 Flash (key rotation) with OpenAI fallbacks via LangChain. Metadata stored per note in JSON.
 - **Organize**: Notes carry folders, tags, generated topics, and language inference. Narratives can be stitched together or regenerated with extra context.
-- **Feedback Loop**: `/api/integrations/telegram` accepts text or audio from n8n, enforces optional `N8N_WEBHOOK_TOKEN`, and returns structured acknowledgements (`status`, `transcription_status`, `summary`, etc.) so Telegram automations can respond like a real teammate.
+- **Feedback Loop**: `/api/integrations/telegram` accepts text or audio directly from Telegram (and other callers with a shared token), returning structured acknowledgements (`status`, `transcription_status`, `summary`, etc.) so automations can respond like a real teammate.
 - **Storage Layout** (relative to `STORAGE_DIR`):
   - `voice_notes/` – original or normalized audio.
   - `transcriptions/` – JSON per note (metadata, transcription, tags).
@@ -28,7 +28,7 @@
    - Keep the pipeline modular so other agents can plug in custom taxonomies or scoring.
 2. **Telegram “Human-in-the-loop” Experience**:
    - Continue improving the webhook response text (“Saved in X; tags Y; Snapshot …”) so the user receives empathetic, concise confirmation.
-   - Ensure long-term compatibility with n8n HTTP nodes (multipart + JSON).
+   - Keep multipart + JSON compatibility so other automation runners can plug in easily.
 3. **Resilience & Observability**:
    - Maintain the Gemini→OpenAI fallback pattern throughout new features.
    - Log key decisions (folder choice, summary text) for auditing.

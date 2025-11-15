@@ -8,14 +8,26 @@ import config
 from routes import integrations, models, narratives, notes, programs, folders
 from utils import on_startup
 
-logging.basicConfig(level=logging.INFO)
-for noisy in [
+LOG_LEVEL_NAME = getattr(config, "LOG_LEVEL", "INFO") or "INFO"
+LOG_LEVEL = getattr(logging, LOG_LEVEL_NAME.upper(), logging.INFO)
+LOG_FORMAT = (
+    '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","message":"%(message)s"}'
+    if getattr(config, "LOG_JSON", False)
+    else "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+)
+
+logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
+
+for noisy in (
     "google.generativeai",
     "langchain",
     "langchain_core",
     "langchain_google_genai",
-]:
-    logging.getLogger(noisy).setLevel(logging.ERROR)
+    "uvicorn",
+    "uvicorn.error",
+    "uvicorn.access",
+):
+    logging.getLogger(noisy).setLevel(LOG_LEVEL)
 
 app = FastAPI()
 

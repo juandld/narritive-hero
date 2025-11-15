@@ -6,7 +6,7 @@ Updated: 2024-11-02
 - **Core value**: frictionless capture → transparent organization → narrative-ready output.
 - **Latest additions**:
   - Frontend recorder now shows a live waveform + recording indicator (via `svelte-audio-waveform`).
-  - Telegram/n8n webhook accepts text *and* audio, responds with status, summaries, and tag/folder info.
+- Telegram webhook accepts text *and* audio, responds with status, summaries, and tag/folder info.
   - Smoke test suite covers `/api/notes`, `/api/narratives/generate`, and transcription pipeline.
   - `development/north-star.md` codifies mission, pillars, and onboarding steps for agents.
 
@@ -44,4 +44,5 @@ Updated: 2024-11-02
 - North star / foundational guidance: `development/north-star.md`
 - Frontend recording component: `frontend/src/lib/components/NarrativeIterateModal.svelte`
 - Telegram webhook + summary helpers: `backend/main.py` (`_create_note_from_text_payload`, `_summarize_text_snippet`, `/api/integrations/telegram`)
+- Telegram companion roadmap: `development/telegram-companion.md`
 - Smoke tests entry point: `tests/backend/test.sh`
