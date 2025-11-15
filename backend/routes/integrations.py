@@ -160,6 +160,32 @@ def _build_status_message(
     return "; ".join(status_bits) + "."
 
 
+def _build_feedback(
+    summary: Optional[str],
+    folder: str,
+    tags: list[str],
+    note_data: Dict[str, Any],
+) -> str:
+    pieces: list[str] = []
+    snapshot = (summary or "").strip() or "OK"
+    pieces.append(f"Snapshot: {snapshot}")
+    folder_clean = (folder or "").strip()
+    if folder_clean:
+        pieces.append(f"Folder: {folder_clean}")
+    if tags:
+        shown = ", ".join(tags[:3])
+        if len(tags) > 3:
+            shown += ", …"
+        pieces.append(f"Tags: {shown}")
+    auto_category = str((note_data.get("auto_category") or "")).strip()
+    if auto_category:
+        pieces.append(f"Category: {auto_category}")
+    auto_program = str((note_data.get("auto_program") or "")).strip()
+    if auto_program:
+        pieces.append(f"Program: {auto_program}")
+    return " | ".join(pieces)
+
+
 async def _send_followup_when_ready(
     chat_id: int,
     message_id: Optional[int],
@@ -378,6 +404,12 @@ async def _handle_audio_note(
     }
     if summary:
         response["summary"] = summary
+    response["feedback"] = _build_feedback(
+        summary,
+        folder_final or "",
+        visible_tags,
+        note_data,
+    )
     return response
 
 
@@ -422,6 +454,12 @@ async def _handle_text_note(
         "auto_program": result.get("auto_program"),
         "auto_program_confidence": result.get("auto_program_confidence"),
     }
+    response["feedback"] = _build_feedback(
+        result.get("summary"),
+        folder_final,
+        tags_resp,
+        result,
+    )
     return response
 
 
