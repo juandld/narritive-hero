@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$ROOT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
 # Respect user-defined dev ports
 FRONTEND_DEV_PORT=${FRONTEND_DEV_PORT:-5173}
 BACKEND_DEV_PORT=${BACKEND_DEV_PORT:-8000}
@@ -8,6 +17,27 @@ FRONTEND_DEV_HOST=${FRONTEND_DEV_HOST:-0.0.0.0}
 FRONTEND_USE_HTTPS=${FRONTEND_USE_HTTPS:-0}
 FRONTEND_CERT=${FRONTEND_CERT:-}
 FRONTEND_KEY=${FRONTEND_KEY:-}
+
+start_appwrite_stack() {
+  if [ "${START_APPWRITE:-0}" != "1" ]; then
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "START_APPWRITE=1 requires Docker." >&2
+    exit 1
+  fi
+  local compose_cmd=("docker" "compose")
+  if ! docker compose version >/dev/null 2>&1; then
+    if command -v docker-compose >/dev/null 2>&1; then
+      compose_cmd=("docker-compose")
+    else
+      echo "Could not find docker compose. Install Docker Desktop or docker-compose." >&2
+      exit 1
+    fi
+  fi
+  echo "Starting Appwrite stack via docker compose..."
+  "${compose_cmd[@]}" up -d mariadb redis smtp clamav appwrite
+}
 
 is_port_free() {
   local port=$1
@@ -36,6 +66,8 @@ FE_PORT=$(pick_frontend_port ${FRONTEND_DEV_PORT})
 if [ "$FE_PORT" != "$FRONTEND_DEV_PORT" ]; then
   echo "Note: Requested :$FRONTEND_DEV_PORT busy; using :$FE_PORT"
 fi
+
+start_appwrite_stack
 
 # Start frontend dev server (use chosen free port). Use exec so PID is npm itself.
 echo "Starting frontend dev server on :$FE_PORT..."

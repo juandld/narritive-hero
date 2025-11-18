@@ -6,27 +6,24 @@ import os
 from fastapi import APIRouter, Request, Response
 
 import config
-import note_store
 from core.folders import load_folders_registry, save_folders_registry
+from store.media import delete_audio_file
+from store import get_notes_store
 
 router = APIRouter()
+NOTES_STORE = get_notes_store()
 
 
 @router.get("/api/folders")
 async def list_folders():
-    os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
     counts: dict[str, int] = {}
-    for fn in os.listdir(config.TRANSCRIPTS_DIR):
-        if not fn.endswith('.json'):
-            continue
-        try:
-            with open(os.path.join(config.TRANSCRIPTS_DIR, fn), 'r') as f:
-                data = json.load(f)
-            folder = (data.get('folder') or '').strip()
+    try:
+        for note in NOTES_STORE.list_notes():
+            folder = (note.get("folder") or "").strip()
             if folder:
                 counts[folder] = counts.get(folder, 0) + 1
-        except Exception:
-            continue
+    except Exception:
+        pass
     registry = load_folders_registry()
     for name in registry:
         counts.setdefault(name, 0)
@@ -56,33 +53,26 @@ async def delete_folder(name: str):
     clean = (name or "").strip()
     registry = load_folders_registry()
     deleted_notes = 0
-    for fn in list(os.listdir(config.TRANSCRIPTS_DIR)):
-        if not fn.endswith('.json'):
-            continue
-        json_path = os.path.join(config.TRANSCRIPTS_DIR, fn)
-        try:
-            with open(json_path, 'r') as f:
-                data = json.load(f)
-            if (data.get('folder') or '').strip() != clean:
+    try:
+        for note in list(NOTES_STORE.list_notes()):
+            folder = (note.get("folder") or "").strip()
+            if folder != clean:
                 continue
-            base = os.path.splitext(fn)[0]
-            audio_path = None
-            try:
-                audio_path = note_store._find_audio_path(base, data)  # type: ignore[attr-defined]
-            except Exception:
-                audio_path = None
-            if audio_path and os.path.exists(audio_path):
-                try:
-                    os.remove(audio_path)
-                except Exception:
-                    pass
-            try:
-                os.remove(json_path)
-            except Exception:
-                pass
+            filename = note.get("filename")
+            file_id = note.get("appwrite_file_id")
+            if filename:
+                audio_path = os.path.join(config.VOICE_NOTES_DIR, filename)
+                if os.path.exists(audio_path):
+                    try:
+                        os.remove(audio_path)
+                    except Exception:
+                        pass
+            if file_id:
+                delete_audio_file(file_id)
+            NOTES_STORE.delete_note(os.path.splitext(filename or "")[0])
             deleted_notes += 1
-        except Exception:
-            continue
+    except Exception:
+        pass
     normalized = [n for n in registry if n != clean]
     save_folders_registry(normalized)
     return {"deleted": clean, "notes_deleted": deleted_notes}

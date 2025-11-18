@@ -3,12 +3,15 @@ import json
 import io
 import asyncio
 from datetime import datetime
+from typing import Optional
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from base64 import b64encode
 import config
 import providers
-import note_store
+from note_store import audio_length_seconds, ensure_metadata_in_json, ensure_placeholder_note, build_note_payload
+from store import get_notes_store
+from store.media import delete_audio_file, download_audio_to_temp
 import usage_log as usage
 
 # Load environment variables from .env file
@@ -24,14 +27,35 @@ OPENAI_TITLE_MODEL = config.OPENAI_TITLE_MODEL
 # Mirror config into module variables so tests can monkeypatch these paths
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
+NOTES_STORE = get_notes_store()
 
 async def transcribe_and_save(wav_path):
     """Transcribes and titles an audio file, saving the results."""
     base_filename = os.path.basename(wav_path)
+    base_name = os.path.splitext(base_filename)[0]
     ext = os.path.splitext(base_filename)[1].lower().lstrip('.') or 'wav'
     print(f"Starting transcription process for {base_filename}...")
+
+    temp_download: Optional[str] = None
+    existing: Optional[dict] = None
+    appwrite_file_id: Optional[str] = None
+
     try:
-        # Read audio bytes
+        existing, _, _ = NOTES_STORE.load_note(base_name)
+    except Exception:
+        existing = None
+    if isinstance(existing, dict):
+        appwrite_file_id = existing.get("appwrite_file_id")
+
+    try:
+        if not os.path.exists(wav_path) and appwrite_file_id:
+            temp = download_audio_to_temp(appwrite_file_id)
+            if temp:
+                wav_path = temp
+                temp_download = temp
+        if not os.path.exists(wav_path):
+            raise FileNotFoundError(f"Audio file {base_filename} missing for transcription.")
+
         with open(wav_path, "rb") as af:
             audio_bytes = af.read()
 
@@ -158,7 +182,6 @@ async def transcribe_and_save(wav_path):
                 title_text = "Title generation failed."
         print(f"Successfully generated title for {base_filename}.")
 
-        base_name = os.path.splitext(base_filename)[0]
         audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
         stored_mime = {
             'm4a': 'audio/mp4',
@@ -175,68 +198,63 @@ async def transcribe_and_save(wav_path):
             metadata.setdefault("sample_rate_hz", 44100)
         elif audio_ext == 'wav':
             metadata.setdefault("sample_rate_hz", 16000)
-        existing = None
-        try:
-            existing, _, _ = note_store.load_note_json(base_name)
-        except Exception:
-            existing = None
         if isinstance(existing, dict):
-            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension"):
+            appwrite_file_id = existing.get("appwrite_file_id")
+            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension", "appwrite_file_id"):
                 if key in existing and existing[key] is not None:
                     metadata.setdefault(key, existing[key])
         metadata.setdefault("original_format", metadata.get("audio_format"))
         metadata.setdefault("transcoded", False)
-        payload = note_store.build_note_payload(base_filename, title_text, transcribed_text, metadata)
+        payload = build_note_payload(base_filename, title_text, transcribed_text, metadata)
+        if appwrite_file_id:
+            payload["appwrite_file_id"] = appwrite_file_id
         if isinstance(existing, dict):
             if 'folder' in existing and (existing.get('folder') or '').strip() != '':
                 payload['folder'] = existing.get('folder')
             if 'tags' in existing and isinstance(existing.get('tags'), list):
                 payload['tags'] = existing.get('tags')
-        note_store.save_note_json(base_name, payload)
+        NOTES_STORE.save_note(base_name, payload)
         print(f"Successfully saved transcription and title for {base_filename}.")
 
     except Exception as e:
         print(f"Error during transcription/titling for {wav_path}: {e}")
-        if os.path.exists(wav_path):
-            base_name = os.path.splitext(base_filename)[0]
-            audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
-            stored_mime = {
-                'm4a': 'audio/mp4',
-                'mp3': 'audio/mpeg',
-                'wav': 'audio/wav',
-                'ogg': 'audio/ogg',
-                'webm': 'audio/webm',
-            }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
-            metadata = {
-                "audio_format": audio_ext,
-                "stored_mime": stored_mime,
-            }
-            if audio_ext == 'm4a':
-                metadata.setdefault("sample_rate_hz", 44100)
-            elif audio_ext == 'wav':
-                metadata.setdefault("sample_rate_hz", 16000)
-            existing = None
-            try:
-                existing, _, _ = note_store.load_note_json(base_name)
-            except Exception:
-                existing = None
-            if isinstance(existing, dict):
-                for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension"):
-                    if key in existing and existing[key] is not None:
-                        metadata.setdefault(key, existing[key])
-            metadata.setdefault("original_format", metadata.get("audio_format"))
-            metadata.setdefault("transcoded", False)
-            payload = note_store.build_note_payload(base_filename, "Title generation failed.", "Transcription failed.", metadata)
-            try:
-                existing = existing or {}
-                if isinstance(existing, dict):
-                    if 'folder' in existing and (existing.get('folder') or '').strip() != '':
-                        payload['folder'] = existing.get('folder')
-                    if 'tags' in existing and isinstance(existing.get('tags'), list):
-                        payload['tags'] = existing.get('tags')
-            except Exception:
-                pass
-            note_store.save_note_json(base_name, payload)
+        audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
+        stored_mime = {
+            'm4a': 'audio/mp4',
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'ogg': 'audio/ogg',
+            'webm': 'audio/webm',
+        }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+        metadata = {
+            "audio_format": audio_ext,
+            "stored_mime": stored_mime,
+        }
+        if audio_ext == 'm4a':
+            metadata.setdefault("sample_rate_hz", 44100)
+        elif audio_ext == 'wav':
+            metadata.setdefault("sample_rate_hz", 16000)
+        if isinstance(existing, dict):
+            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension", "appwrite_file_id"):
+                if key in existing and existing[key] is not None:
+                    metadata.setdefault(key, existing[key])
+        metadata.setdefault("original_format", metadata.get("audio_format"))
+        metadata.setdefault("transcoded", False)
+        payload = build_note_payload(base_filename, "Title generation failed.", "Transcription failed.", metadata)
+        if appwrite_file_id:
+            payload["appwrite_file_id"] = appwrite_file_id
+        if isinstance(existing, dict):
+            if 'folder' in existing and (existing.get('folder') or '').strip():
+                payload['folder'] = existing.get('folder')
+            if isinstance(existing.get('tags'), list):
+                payload['tags'] = existing.get('tags')
+        try:
+            NOTES_STORE.save_note(base_name, payload)
+        except Exception:
+            pass
+    finally:
+        if temp_download and os.path.exists(temp_download):
+            os.remove(temp_download)
 
 # Removed unused helpers and scenario-related functions to reduce complexity
 
@@ -247,6 +265,33 @@ def get_notes():
       - Notes with audio files under VOICE_NOTES_DIR
       - Text-only notes that exist as JSONs under TRANSCRIPTS_DIR
     """
+    if getattr(config, "STORE_BACKEND", "filesystem") == "appwrite":
+        notes = []
+        for data in NOTES_STORE.list_notes():
+            note = dict(data or {})
+            title = (note.get("title") or "").strip() or (note.get("filename") or "")
+            if title.lower() in ("untitled", "title generation failed."):
+                title = note.get("filename") or title
+            notes.append({
+                "filename": note.get("filename") or "",
+                "transcription": note.get("transcription"),
+                "title": title or "Untitled",
+                "date": note.get("date"),
+                "created_at": note.get("created_at"),
+                "created_ts": note.get("created_ts"),
+                "length_seconds": note.get("length_seconds"),
+                "topics": note.get("topics", []),
+                "language": note.get("language", "und"),
+                "folder": note.get("folder", ""),
+                "tags": note.get("tags", []),
+                "auto_category": note.get("auto_category"),
+                "auto_category_confidence": note.get("auto_category_confidence"),
+                "auto_program": note.get("auto_program"),
+                "auto_program_confidence": note.get("auto_program_confidence"),
+            })
+        notes.sort(key=lambda n: n.get("created_ts") or 0, reverse=True)
+        return notes
+
     notes: list[dict] = []
 
     # Ensure dirs exist
@@ -262,10 +307,10 @@ def get_notes():
         base_filename = os.path.splitext(filename)[0]
         seen_bases.add(base_filename)
         audio_path = os.path.join(VOICE_NOTES_DIR, filename)
-        data, transcription, title = note_store.load_note_json(base_filename)
+        data, transcription, title = NOTES_STORE.load_note(base_filename)
         if data is None:
             try:
-                placeholder = note_store.ensure_placeholder_note(filename)
+                placeholder = ensure_placeholder_note(filename)
                 data = placeholder
                 transcription = placeholder.get("transcription")
                 title = placeholder.get("title")
@@ -273,7 +318,7 @@ def get_notes():
                 # Fallback to a lightweight entry without saving if placeholder creation fails
                 mtime = os.path.getmtime(audio_path)
                 date_str = __import__('datetime').datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-                length_sec = note_store.audio_length_seconds(audio_path)
+                length_sec = audio_length_seconds(audio_path)
                 audio_ext = os.path.splitext(filename)[1].lstrip('.').lower() or 'wav'
                 stored_mime = {
                     'm4a': 'audio/mp4',
@@ -300,7 +345,7 @@ def get_notes():
                 })
                 continue
         else:
-            data = note_store.ensure_metadata_in_json(base_filename, data)
+            data = ensure_metadata_in_json(base_filename, data)
 
         # Normalize title: avoid placeholder values
         _title = (title or data.get("title") or "").strip()
@@ -336,7 +381,7 @@ def get_notes():
                 data = json.load(f)
             # Ensure JSON has expected metadata (language, topics, etc.)
             try:
-                data = note_store.ensure_metadata_in_json(base, data)
+                data = ensure_metadata_in_json(base, data)
             except Exception:
                 pass
             # Use JSON content directly

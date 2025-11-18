@@ -7,14 +7,16 @@ import contextlib
 from datetime import datetime
 from services import transcribe_and_save
 import usage_log as usage
-import note_store as _ns
+from note_store import build_note_payload, ensure_metadata_in_json as ensure_metadata_json, save_note_json
 import providers
 from langchain_core.messages import HumanMessage
 import config
+from store import get_notes_store
 
 # Centralized paths; keep module vars for monkeypatching in tests
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
+NOTES_STORE = get_notes_store()
 
 async def on_startup():
     """On startup, create voice notes dir and backfill any missing transcriptions."""
@@ -43,40 +45,43 @@ async def on_startup():
     print("Checking for missing transcriptions...")
     # Legacy consolidation disabled: only JSON is considered
 
-    AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
-    wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)}
-    json_files = {f for f in os.listdir(TRANSCRIPTS_DIR) if f.endswith('.json')}
-    # Ignore any legacy .txt/.title files
-
     tasks = []
-    for wav_file in wav_files:
-        base = os.path.splitext(wav_file)[0]
-        json_filename = base + '.json'
-        # If JSON missing, schedule transcription/title generation
-        if json_filename not in json_files:
-            wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
-            # Create a minimal JSON immediately so a title is present in the UI
-            try:
-                payload = _ns.build_note_payload(wav_file, base, "", include_length=False)
-                _ns.save_note_json(base, payload)
-            except Exception:
-                pass
-            tasks.append(transcribe_and_save(wav_path))
-        else:
-            # JSON exists. Re-transcribe only if it previously failed.
-            json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
-            try:
-                with open(json_path, 'r') as jf:
-                    data = json.load(jf)
-                if data.get('transcription') == 'Transcription failed.':
+    AUDIO_EXTS = ('.wav', '.ogg', '.webm', '.m4a', '.mp3')
+    if getattr(config, "STORE_BACKEND", "filesystem") == "filesystem":
+        wav_files = {f for f in os.listdir(VOICE_NOTES_DIR) if f.lower().endswith(AUDIO_EXTS)}
+        json_files = {f for f in os.listdir(TRANSCRIPTS_DIR) if f.endswith('.json')}
+
+        for wav_file in wav_files:
+            base = os.path.splitext(wav_file)[0]
+            json_filename = base + '.json'
+            if json_filename not in json_files:
+                wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
+                try:
+                    payload = build_note_payload(wav_file, base, "", include_length=False)
+                    save_note_json(base, payload)
+                except Exception:
+                    pass
+                tasks.append(transcribe_and_save(wav_path))
+            else:
+                json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
+                try:
+                    with open(json_path, 'r') as jf:
+                        data = json.load(jf)
+                    if data.get('transcription') == 'Transcription failed.':
+                        wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
+                        tasks.append(transcribe_and_save(wav_path))
+                except Exception:
                     wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
                     tasks.append(transcribe_and_save(wav_path))
-                else:
-                    continue
-            except Exception:
-                # If unreadable, try to regenerate
-                wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
-                tasks.append(transcribe_and_save(wav_path))
+    else:
+        # Appwrite mode: no local folders to scan; rely on store listings.
+        for note in NOTES_STORE.list_notes():
+            if (note.get("transcription") or "").strip() == "Transcription failed.":
+                filename = note.get("filename")
+                if filename:
+                    wav_path = os.path.join(VOICE_NOTES_DIR, filename)
+                    if os.path.exists(wav_path):
+                        tasks.append(transcribe_and_save(wav_path))
 
     # Ensure metadata fields (language/topics/tags/folder/length/date) exist on all JSONs
     try:
@@ -90,7 +95,7 @@ async def on_startup():
                 with open(jp, 'r') as f:
                     data = json.load(f)
                 before = json.dumps(data, sort_keys=True)
-                data2 = _ns.ensure_metadata_in_json(base, data)
+                data2 = ensure_metadata_json(base, data)
                 after = json.dumps(data2, sort_keys=True)
                 if before != after:
                     count_updated += 1
@@ -125,7 +130,7 @@ async def on_startup():
                             title = base
                     data['title'] = title or base
                 # persist update
-                _ns.save_note_json(base, data)
+                save_note_json(base, data)
                 try:
                     usage.log_usage(event="title_backfill", provider="auto", model="n/a", key_label="n/a", status="success")
                 except Exception:

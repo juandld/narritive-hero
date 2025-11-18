@@ -20,10 +20,13 @@ Narrative Hero delivers frictionless voice capture that quickly becomes organize
   - Option A: from the repo root run `./dev.sh` (auto-picks a free Vite port, ensures frontend deps/ backend venv exist, and starts both servers)
   - Option B: run them manually — backend command above in one terminal, `cd frontend && npm install && npm run dev` in another
   - App: open `http://localhost:5173`
+- Need Appwrite locally? Put `START_APPWRITE=1` in your `.env` (or export it) and run `./dev.sh` to spin up the Appwrite docker stack automatically (requires Docker).
+- Migrating existing local notes to Appwrite? Once Appwrite is provisioned, run `STORE_BACKEND=filesystem python backend/scripts/migrate_to_appwrite.py` (use `--dry-run` first) to copy JSON/audio and registries into your Appwrite project.
 - Docker (all-in-one): `docker compose up --build` then open `http://localhost` (backend at `http://localhost:8000`).
 - Add notes: click Upload (Topbar), drag & drop audio anywhere, use Start Recording, or click New Text Note to paste an existing transcript.
 - Expand/collapse text: click the ▼/▲ toggle within a note card. You can also switch views (List/Compact/Grid) from the Topbar.
 - API docs: FastAPI Swagger UI is available at `http://localhost:8000/docs`.
+- Automated deploy: populate `.env` with your Appwrite + provider keys and run `./deployment.sh`. It spins up Appwrite (plus the schema worker), bootstraps collections/buckets via `backend/scripts/setup_appwrite_schema.py`, migrates filesystem notes/programs into Appwrite, and rebuilds the backend/frontend containers.
 
 ## Features (Aligned with the North Star)
 
@@ -279,6 +282,13 @@ Backend reads from `backend/.env`. Compose now also loads the repo root `.env` f
 - `TELEGRAM_BOT_TOKEN` — optional. When set, the backend exposes a Telegram webhook endpoint so the bot can talk to Narrative Hero directly.
 - `TELEGRAM_WEBHOOK_SECRET` — optional. If set, Telegram must include this secret via the `X-Telegram-Bot-Api-Secret-Token` header when calling the webhook.
 - `TELEGRAM_INGEST_TOKEN` — optional. Shared secret for the HTTP ingest endpoint (`/api/integrations/telegram`) when calling it from custom automations.
+- `STORE_BACKEND` — `filesystem` (default) or `appwrite`. Use `appwrite` when the Appwrite datastore is provisioned.
+- **Appwrite (for upcoming auth/storage work)**:
+- `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_API_KEY`
+- `APPWRITE_DATABASE_ID` plus collection IDs: `APPWRITE_NOTES_COLLECTION_ID`, `APPWRITE_NARRATIVES_COLLECTION_ID`, `APPWRITE_FORMATS_COLLECTION_ID`, `APPWRITE_FOLDERS_COLLECTION_ID`, `APPWRITE_PROGRAMS_COLLECTION_ID`
+- Storage buckets: `APPWRITE_BUCKET_VOICE_NOTES`, `APPWRITE_BUCKET_NARRATIVES`
+- `APPWRITE_AUTH_STRATEGY` (e.g., `email`, `oauth`) to document the chosen login flow
+- `APPWRITE_ADMIN_KEY` (optional) — when set, `./deployment.sh` and schema scripts use it for collection/attribute creation; falls back to `APPWRITE_API_KEY` otherwise.
 
 Frontend config: `frontend/src/lib/config.ts` → `BACKEND_URL` (uses `VITE_BACKEND_URL` at build, or computes `http(s)://<current-host>:8000` at runtime if unset).
 You can set `VITE_BACKEND_URL` at build time to point the frontend at your API (e.g., `https://api.example.com`).
@@ -541,6 +551,7 @@ Notes
 - Config before build: set `VITE_BACKEND_URL` to public API URL if not default.
 - Persistence: host volumes map to `./storage/*` so local data survives rebuilds.
 - Static frontend: the Dockerized frontend builds to static assets served by Nginx (see `frontend/nginx.conf`). The browser talks directly to the backend at `:8000`.
+- Non-interactive deploy: run `./deployment.sh` after updating `.env`. The script loads your env vars, brings up Appwrite + worker containers, runs the schema bootstrap (`backend/scripts/setup_appwrite_schema.py`), migrates data (`backend/scripts/migrate_to_appwrite.py`), and restarts the Narrative Hero services. Requires `python3` with `httpx` installed on the host.
 
 ## Gotchas
 

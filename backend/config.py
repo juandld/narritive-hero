@@ -6,6 +6,7 @@ so the rest of the codebase can import from here without repeating logic.
 """
 
 import os
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables early
@@ -65,6 +66,23 @@ OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_NARRATIVE_MODEL = os.getenv("OPENAI_NARRATIVE_MODEL", "gpt-4o")
 
+# Storage backend selection (filesystem default today; Appwrite planned)
+STORE_BACKEND = (os.getenv("STORE_BACKEND") or "filesystem").strip().lower()
+
+# Appwrite configuration (used when STORE_BACKEND == "appwrite")
+APPWRITE_ENDPOINT = (os.getenv("APPWRITE_ENDPOINT") or "").strip()
+APPWRITE_PROJECT_ID = (os.getenv("APPWRITE_PROJECT_ID") or "").strip()
+APPWRITE_API_KEY = (os.getenv("APPWRITE_API_KEY") or "").strip()
+APPWRITE_DATABASE_ID = (os.getenv("APPWRITE_DATABASE_ID") or "").strip()
+APPWRITE_NOTES_COLLECTION_ID = (os.getenv("APPWRITE_NOTES_COLLECTION_ID") or "").strip()
+APPWRITE_NARRATIVES_COLLECTION_ID = (os.getenv("APPWRITE_NARRATIVES_COLLECTION_ID") or "").strip()
+APPWRITE_FORMATS_COLLECTION_ID = (os.getenv("APPWRITE_FORMATS_COLLECTION_ID") or "").strip()
+APPWRITE_FOLDERS_COLLECTION_ID = (os.getenv("APPWRITE_FOLDERS_COLLECTION_ID") or "").strip()
+APPWRITE_PROGRAMS_COLLECTION_ID = (os.getenv("APPWRITE_PROGRAMS_COLLECTION_ID") or "").strip()
+APPWRITE_BUCKET_VOICE_NOTES = (os.getenv("APPWRITE_BUCKET_VOICE_NOTES") or "").strip()
+APPWRITE_BUCKET_NARRATIVES = (os.getenv("APPWRITE_BUCKET_NARRATIVES") or "").strip()
+APPWRITE_AUTH_STRATEGY = (os.getenv("APPWRITE_AUTH_STRATEGY") or "email").strip().lower()
+
 def collect_google_api_keys() -> list[str]:
     keys = []
     for name in [
@@ -113,7 +131,7 @@ def _collect_allowed_origins() -> list[str]:
 ALLOWED_ORIGINS = _collect_allowed_origins()
 
 
-def _parse_bool(value: str | None, default: bool = False) -> bool:
+def _parse_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
     normalized = value.strip().lower()
