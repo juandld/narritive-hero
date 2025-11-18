@@ -34,6 +34,9 @@ Updated: 2024-11-02
 4. **Telemetry & Observability**
    - Record categorization decisions and summarization results for auditing.
    - Consider lightweight dashboards or log aggregation for webhook interactions.
+5. **Appwrite Readiness**
+   - Define environment variables, buckets, and collections for the upcoming Appwrite-backed auth/storage work.
+   - Plan migration scripts plus feature flags so we can toggle between filesystem and Appwrite stores safely.
 
 ## Near-Term Roadmap
 - **Week 1**: Ship categorizer service (LLM prompt + fallback heuristics), wire into webhook + background tasks.

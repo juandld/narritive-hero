@@ -15,12 +15,15 @@ from langchain_core.messages import HumanMessage
 
 import categorizer
 import config
-import note_store as _note_store
+from note_store import build_note_payload, ensure_placeholder_note, infer_language, infer_topics, save_note_json
+from store import get_notes_store
+from store.media import upload_audio_file
 import providers
 from services import transcribe_and_save
 from core.programs import load_programs_registry
 
 logger = logging.getLogger(__name__)
+NOTES_STORE = get_notes_store()
 
 
 async def summarize_text_snippet(text: str) -> Optional[str]:
@@ -165,8 +168,8 @@ async def create_note_from_text_payload(body: dict, include_summary: bool = Fals
         "created_at": now.isoformat(),
         "created_ts": int(now.timestamp() * 1000),
         "length_seconds": None,
-        "topics": _note_store.infer_topics(transcription, title or None),
-        "language": _note_store.infer_language(transcription, title or None),
+        "topics": infer_topics(transcription, title or None),
+        "language": infer_language(transcription, title or None),
         "folder": folder,
         "tags": [{"label": t["label"], "color": t.get("color")} for t in tags if t.get("label")],
     }
@@ -177,6 +180,11 @@ async def create_note_from_text_payload(body: dict, include_summary: bool = Fals
 
     with open(os.path.join(config.TRANSCRIPTS_DIR, f"{nid}.json"), 'w') as jf:
         json.dump(data, jf, ensure_ascii=False)
+    if getattr(config, "STORE_BACKEND", "filesystem") == "appwrite":
+        try:
+            NOTES_STORE.save_note(nid, data.copy())
+        except Exception as exc:
+            logger.warning("Failed to save text note to Appwrite (nid=%s): %s", nid, exc, exc_info=True)
 
     result: Dict[str, Any] = {
         "filename": pseudo_filename,
@@ -323,16 +331,44 @@ async def process_audio_upload(
         with open(file_path, "wb") as buffer:
             buffer.write(upload_bytes)
 
+    appwrite_file_id = None
+    if getattr(config, 'STORE_BACKEND', 'filesystem') == 'appwrite' and os.path.exists(file_path):
+        try:
+            with open(file_path, 'rb') as fh:
+                uploaded = upload_audio_file(filename, fh.read(), stored_mime)
+            if isinstance(uploaded, str) and uploaded.strip():
+                appwrite_file_id = uploaded
+            else:
+                if uploaded not in (None, ""):
+                    logger.warning("Unexpected upload result for %s: %r", filename, uploaded)
+                appwrite_file_id = None
+        except Exception as exc:
+            logger.warning("Failed to upload audio to Appwrite for %s: %s", filename, exc, exc_info=True)
+            appwrite_file_id = None
+
+
     try:
         base_filename = os.path.splitext(filename)[0]
-        payload_min = _note_store.build_note_payload(
+        payload_min = build_note_payload(
             filename, base_filename, "", metadata_fields, include_length=False
         )
         if folder:
             payload_min["folder"] = (folder or "").strip()
-        _note_store.save_note_json(base_filename, payload_min)
+        if appwrite_file_id:
+            payload_min["appwrite_file_id"] = appwrite_file_id
+        save_note_json(base_filename, payload_min)
+        if getattr(config, "STORE_BACKEND", "filesystem") == "appwrite":
+            try:
+                NOTES_STORE.save_note(base_filename, payload_min.copy())
+            except Exception as exc:
+                logger.warning(
+                    "Failed to save audio note metadata to Appwrite for %s: %s",
+                    base_filename,
+                    exc,
+                    exc_info=True,
+                )
         try:
-            _note_store.ensure_placeholder_note(filename)
+            ensure_placeholder_note(filename)
         except Exception:
             pass
     except Exception:

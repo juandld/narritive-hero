@@ -2,14 +2,37 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+import threading
+from typing import Any, Dict, List, Optional
 
 import config
+from store.api import AppwriteClient
 
 
 def _programs_registry_path() -> str:
     os.makedirs(config.PROGRAMS_DIR, exist_ok=True)
     return os.path.join(config.PROGRAMS_DIR, "programs.json")
+
+
+def _use_appwrite_registry() -> bool:
+    return (
+        getattr(config, "STORE_BACKEND", "filesystem") == "appwrite"
+        and bool(config.APPWRITE_PROGRAMS_COLLECTION_ID)
+        and bool(config.APPWRITE_DATABASE_ID)
+    )
+
+
+_APPWRITE_CLIENT: Optional[AppwriteClient] = None
+_APPWRITE_CLIENT_LOCK = threading.Lock()
+
+
+def _get_appwrite_client() -> AppwriteClient:
+    global _APPWRITE_CLIENT
+    if _APPWRITE_CLIENT is None:
+        with _APPWRITE_CLIENT_LOCK:
+            if _APPWRITE_CLIENT is None:
+                _APPWRITE_CLIENT = AppwriteClient()
+    return _APPWRITE_CLIENT
 
 
 ALLOWED_DOMAINS = {
@@ -96,6 +119,29 @@ def normalize_program_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_programs_registry() -> List[Dict[str, Any]]:
     try:
+        if _use_appwrite_registry():
+            client = _get_appwrite_client()
+            collection = config.APPWRITE_PROGRAMS_COLLECTION_ID
+            cursor = None
+            out: List[Dict[str, Any]] = []
+            seen: set[str] = set()
+            while True:
+                batch = client.list_documents(collection, cursor=cursor, limit=100)
+                docs = batch.get("documents", [])
+                for doc in docs:
+                    data = doc.get("data") or doc
+                    try:
+                        normalized = normalize_program_entry(data)
+                    except ValueError:
+                        continue
+                    if normalized["key"] in seen:
+                        continue
+                    seen.add(normalized["key"])
+                    out.append(normalized)
+                if not docs:
+                    break
+                cursor = docs[-1]["$id"]
+            return out
         path = _programs_registry_path()
         if not os.path.exists(path):
             return []
@@ -122,6 +168,42 @@ def load_programs_registry() -> List[Dict[str, Any]]:
 
 
 def save_programs_registry(programs: List[Dict[str, Any]]) -> None:
+    if _use_appwrite_registry():
+        client = _get_appwrite_client()
+        collection = config.APPWRITE_PROGRAMS_COLLECTION_ID
+        # Upsert new programs
+        desired_keys = {p["key"] for p in programs}
+        try:
+            cursor = None
+            existing_ids: set[str] = set()
+            page_limit = 100
+            while True:
+                batch = client.list_documents(collection, cursor=cursor, limit=page_limit)
+                docs = batch.get("documents", []) or []
+                for doc in docs:
+                    doc_id = doc.get("$id")
+                    if doc_id:
+                        existing_ids.add(doc_id)
+                if not docs or len(docs) < page_limit:
+                    break
+                cursor = docs[-1].get("$id")
+                if not cursor:
+                    break
+        except Exception:
+            existing_ids = set()
+        for entry in programs:
+            doc_id = entry["key"]
+            try:
+                client.update_document(collection, doc_id, entry)
+            except Exception:
+                client.create_document(collection, doc_id, entry)
+        # Delete removed programs
+        for doc_id in existing_ids - desired_keys:
+            try:
+                client.delete_document(collection, doc_id)
+            except Exception:
+                pass
+        return
     path = _programs_registry_path()
     tmp = path + ".tmp"
     os.makedirs(os.path.dirname(path), exist_ok=True)

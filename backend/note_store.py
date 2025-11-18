@@ -16,11 +16,17 @@ from typing import Any, Dict, Tuple, Optional, List
 import config
 
 
+def _require_filesystem_backend() -> None:
+    """Previously enforced filesystem-only mode; now a no-op for Appwrite readiness."""
+    return
+
+
 def audio_length_seconds(path: str) -> Optional[float]:
     """Return audio length in seconds for common formats.
 
     Uses wave module for WAV; falls back to pydub (ffmpeg) for other types.
     """
+    _require_filesystem_backend()
     try:
         # Prefer the lightweight wave reader for .wav files
         if path.lower().endswith('.wav'):
@@ -115,6 +121,7 @@ def infer_topics(text: Optional[str], title: Optional[str]) -> List[str]:
 
 
 def note_json_path(base_filename: str) -> str:
+    _require_filesystem_backend()
     return os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
 
 
@@ -126,6 +133,7 @@ def build_note_payload(
     include_length: bool = True,
 ) -> dict:
     """Build note JSON payload using the actual audio filename (with extension)."""
+    _require_filesystem_backend()
     audio_path = os.path.join(config.VOICE_NOTES_DIR, audio_filename)
     mtime = os.path.getmtime(audio_path) if os.path.exists(audio_path) else None
     date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d') if mtime else None
@@ -156,6 +164,7 @@ def build_note_payload(
 
 def load_note_json(base_filename: str) -> Tuple[Optional[dict], Optional[str], Optional[str]]:
     """Return (data, transcription, title) from JSON if exists, else (None, None, None)."""
+    _require_filesystem_backend()
     path = note_json_path(base_filename)
     if not os.path.exists(path):
         return None, None, None
@@ -173,6 +182,7 @@ def _find_audio_path(base_filename: str, data: dict) -> Optional[str]:
     Prefer the filename embedded in JSON (data['filename']). Fallback to
     scanning the voice notes directory for any supported extension.
     """
+    _require_filesystem_backend()
     # 1) Prefer JSON's filename, if present
     fname = (data or {}).get('filename')
     if isinstance(fname, str) and fname:
@@ -190,6 +200,7 @@ def _find_audio_path(base_filename: str, data: dict) -> Optional[str]:
 
 def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
     """Ensure date/length/topics/tags fields exist and persist if updated."""
+    _require_filesystem_backend()
     audio_path = _find_audio_path(base_filename, data)
     updated = False
     jp = note_json_path(base_filename)
@@ -280,6 +291,7 @@ def ensure_metadata_in_json(base_filename: str, data: dict) -> dict:
 
 
 def save_note_json(base_filename: str, payload: dict) -> None:
+    _require_filesystem_backend()
     os.makedirs(config.TRANSCRIPTS_DIR, exist_ok=True)
     with open(note_json_path(base_filename), 'w') as jf:
         json.dump(payload, jf, ensure_ascii=False)
@@ -293,6 +305,7 @@ def ensure_placeholder_note(audio_filename: str, base_payload: Optional[dict] = 
     calls avoid repeating expensive ffmpeg probes while the transcription worker
     catches up.
     """
+    _require_filesystem_backend()
     base = os.path.splitext(audio_filename)[0]
     existing, _, _ = load_note_json(base)
     base_payload_data = build_note_payload(audio_filename, base, "", include_length=False)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Request, Response, UploadFile
@@ -8,10 +8,13 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, Request, Response, U
 import config
 from core import note_logic
 from models import FolderUpdate, TagsUpdate
-from note_store import ensure_metadata_in_json
 from services import get_notes, transcribe_and_save
+from store import get_notes_store
+from store.media import delete_audio_file
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+NOTES_STORE = get_notes_store()
 
 
 @router.get("/api/notes")
@@ -44,30 +47,53 @@ async def retry_note(background_tasks: BackgroundTasks, filename: str):
 
 @router.delete("/api/notes/{filename}")
 async def delete_note(filename: str):
-    file_path = os.path.join(config.VOICE_NOTES_DIR, filename)
     base_filename = os.path.splitext(filename)[0]
-    json_path = os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
-    legacy_txt_path = os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.txt")
-    deleted_any = False
-    if os.path.exists(file_path):
+    data = None
+    try:
+        data, _, _ = NOTES_STORE.load_note(base_filename)
+    except Exception as exc:
+        logger.error("Failed to load note %s: %s", base_filename, exc, exc_info=True)
+        data = None
+    file_id = data.get('appwrite_file_id') if data else None
+    audio_path = os.path.join(config.VOICE_NOTES_DIR, filename)
+    note_existed = bool(data) or os.path.exists(audio_path) or bool(file_id)
+
+    local_deleted = True
+    remote_deleted = True
+    store_deleted = True
+    errors: list[str] = []
+
+    if os.path.exists(audio_path):
         try:
-            os.remove(file_path)
-            deleted_any = True
-        except Exception:
-            pass
-    if os.path.exists(json_path):
+            os.remove(audio_path)
+        except OSError as exc:
+            local_deleted = False
+            errors.append(f"Failed to delete audio file: {exc}")
+            logger.error("Failed to delete audio file %s: %s", audio_path, exc, exc_info=True)
+
+    if file_id:
         try:
-            os.remove(json_path)
-            deleted_any = True
-        except Exception:
-            pass
-    if os.path.exists(legacy_txt_path):
-        try:
-            os.remove(legacy_txt_path)
-            deleted_any = True
-        except Exception:
-            pass
-    return Response(status_code=200 if deleted_any else 404)
+            delete_audio_file(file_id)
+        except Exception as exc:
+            remote_deleted = False
+            errors.append(f"Failed to delete remote audio: {exc}")
+            logger.error("Failed to delete Appwrite file %s: %s", file_id, exc, exc_info=True)
+
+    try:
+        NOTES_STORE.delete_note(base_filename)
+    except Exception as exc:
+        store_deleted = False
+        errors.append(f"Failed to delete note metadata: {exc}")
+        logger.error("Failed to delete note metadata for %s: %s", base_filename, exc, exc_info=True)
+
+    if not note_existed:
+        return Response(status_code=404)
+
+    if not (local_deleted and remote_deleted and store_deleted):
+        message = "; ".join(errors) if errors else "Failed to delete note completely."
+        return Response(status_code=500, content=message)
+
+    return Response(status_code=200)
 
 
 @router.post("/api/notes/text")
@@ -87,16 +113,13 @@ async def create_text_note(request: Request):
 @router.patch("/api/notes/{filename}/tags")
 async def update_tags(filename: str, payload: TagsUpdate):
     base_filename = os.path.splitext(filename)[0]
-    json_path = os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
-    if not os.path.exists(json_path):
-        return Response(status_code=404)
     try:
-        with open(json_path, "r") as f:
-            data = json.load(f)
+        data, _, _ = NOTES_STORE.load_note(base_filename)
+        if not data:
+            return Response(status_code=404)
         tags = [{"label": t.label, "color": t.color} for t in payload.tags]
         data["tags"] = tags
-        with open(json_path, "w") as f:
-            json.dump(data, f, ensure_ascii=False)
+        NOTES_STORE.save_note(base_filename, data)
         return {"status": "ok", "tags": tags}
     except Exception as e:
         return {"error": str(e)}
@@ -105,52 +128,13 @@ async def update_tags(filename: str, payload: TagsUpdate):
 @router.patch("/api/notes/{filename}/folder")
 async def update_folder(filename: str, payload: FolderUpdate):
     base_filename = os.path.splitext(filename)[0]
-    json_path = os.path.join(config.TRANSCRIPTS_DIR, f"{base_filename}.json")
     desired_folder = str(payload.folder or "").strip()
-
-    if not os.path.exists(json_path):
-        from note_store import build_note_payload
-
-        try:
-            audio_path = os.path.join(config.VOICE_NOTES_DIR, filename)
-            if not os.path.exists(audio_path):
-                for ext in (".wav", ".ogg", ".webm", ".m4a", ".mp3"):
-                    candidate = os.path.join(config.VOICE_NOTES_DIR, base_filename + ext)
-                    if os.path.exists(candidate):
-                        audio_path = candidate
-                        filename = os.path.basename(candidate)
-                        break
-            audio_ext = os.path.splitext(filename)[1].lstrip(".").lower() or "wav"
-            stored_mime = {
-                "m4a": "audio/mp4",
-                "mp3": "audio/mpeg",
-                "wav": "audio/wav",
-                "ogg": "audio/ogg",
-                "webm": "audio/webm",
-            }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else "audio/wav")
-            metadata_fields = {
-                "audio_format": audio_ext,
-                "stored_mime": stored_mime,
-                "original_format": audio_ext,
-                "transcoded": False,
-            }
-            if audio_ext == "m4a":
-                metadata_fields["sample_rate_hz"] = 44100
-            elif audio_ext == "wav":
-                metadata_fields["sample_rate_hz"] = 16000
-            payload_min = build_note_payload(filename, base_filename, "", metadata_fields, include_length=False)
-            with open(json_path, "w") as f:
-                json.dump(payload_min, f, ensure_ascii=False)
-        except Exception:
-            return Response(status_code=404)
-
     try:
-        with open(json_path, "r") as f:
-            data = json.load(f)
+        data, _, _ = NOTES_STORE.load_note(base_filename)
+        if not data:
+            return Response(status_code=404)
         data["folder"] = desired_folder
-        ensure_metadata_in_json(base_filename, data)
-        with open(json_path, "w") as f:
-            json.dump(data, f, ensure_ascii=False)
+        NOTES_STORE.save_note(base_filename, data)
         return {"status": "ok", "folder": data["folder"]}
     except Exception as e:
         return {"error": str(e)}
