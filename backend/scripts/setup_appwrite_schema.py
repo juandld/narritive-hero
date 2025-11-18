@@ -71,9 +71,16 @@ def wait_for_attribute(collection_id: str, attr_id: str, attempts: int = 20, del
         with httpx.Client(timeout=30) as client:
             resp = client.get(url, headers=headers())
             if resp.status_code == 200:
-                status = resp.json().get("status")
-                if status and status.lower() != "processing":
-                    return
+                body = resp.json()
+                status = (body or {}).get("status")
+                if status:
+                    state = status.lower()
+                    if state == "available":
+                        return
+                    if state not in ("processing", "stuck"):
+                        raise SystemExit(
+                            f"Attribute {collection_id}.{attr_id} failed with status: {status} ({body})"
+                        )
         time.sleep(delay)
     raise SystemExit(f"Attribute {collection_id}.{attr_id} still processing; try rerunning later.")
 

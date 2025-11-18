@@ -183,8 +183,8 @@ async def create_note_from_text_payload(body: dict, include_summary: bool = Fals
     if getattr(config, "STORE_BACKEND", "filesystem") == "appwrite":
         try:
             NOTES_STORE.save_note(nid, data.copy())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to save text note to Appwrite (nid=%s): %s", nid, exc, exc_info=True)
 
     result: Dict[str, Any] = {
         "filename": pseudo_filename,
@@ -336,8 +336,14 @@ async def process_audio_upload(
         try:
             with open(file_path, 'rb') as fh:
                 uploaded = upload_audio_file(filename, fh.read(), stored_mime)
-            appwrite_file_id = uploaded
-        except Exception:
+            if isinstance(uploaded, str) and uploaded.strip():
+                appwrite_file_id = uploaded
+            else:
+                if uploaded not in (None, ""):
+                    logger.warning("Unexpected upload result for %s: %r", filename, uploaded)
+                appwrite_file_id = None
+        except Exception as exc:
+            logger.warning("Failed to upload audio to Appwrite for %s: %s", filename, exc, exc_info=True)
             appwrite_file_id = None
 
 
@@ -354,8 +360,13 @@ async def process_audio_upload(
         if getattr(config, "STORE_BACKEND", "filesystem") == "appwrite":
             try:
                 NOTES_STORE.save_note(base_filename, payload_min.copy())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to save audio note metadata to Appwrite for %s: %s",
+                    base_filename,
+                    exc,
+                    exc_info=True,
+                )
         try:
             ensure_placeholder_note(filename)
         except Exception:

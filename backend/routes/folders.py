@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 from fastapi import APIRouter, Request, Response
@@ -10,6 +11,7 @@ from core.folders import load_folders_registry, save_folders_registry
 from store.media import delete_audio_file
 from store import get_notes_store
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 NOTES_STORE = get_notes_store()
 
@@ -60,19 +62,30 @@ async def delete_folder(name: str):
                 continue
             filename = note.get("filename")
             file_id = note.get("appwrite_file_id")
+            note_id = os.path.splitext(filename)[0] if filename else None
+            if not note_id:
+                logger.warning("Skipping note without valid filename during folder delete: %s", note)
+                continue
             if filename:
                 audio_path = os.path.join(config.VOICE_NOTES_DIR, filename)
                 if os.path.exists(audio_path):
                     try:
                         os.remove(audio_path)
-                    except Exception:
-                        pass
+                    except OSError as exc:
+                        logger.error("Failed to remove audio file %s: %s", audio_path, exc, exc_info=True)
             if file_id:
-                delete_audio_file(file_id)
-            NOTES_STORE.delete_note(os.path.splitext(filename or "")[0])
+                try:
+                    delete_audio_file(file_id)
+                except Exception as exc:
+                    logger.error("Failed to delete remote audio %s: %s", file_id, exc, exc_info=True)
+            try:
+                NOTES_STORE.delete_note(note_id)
+            except Exception as exc:
+                logger.error("Failed to delete note %s from store: %s", note_id, exc, exc_info=True)
+                continue
             deleted_notes += 1
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("Failed to delete notes in folder %s: %s", clean, exc, exc_info=True)
     normalized = [n for n in registry if n != clean]
     save_folders_registry(normalized)
     return {"deleted": clean, "notes_deleted": deleted_notes}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Request, Response, UploadFile
@@ -11,6 +12,7 @@ from services import get_notes, transcribe_and_save
 from store import get_notes_store
 from store.media import delete_audio_file
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 NOTES_STORE = get_notes_store()
 
@@ -46,28 +48,52 @@ async def retry_note(background_tasks: BackgroundTasks, filename: str):
 @router.delete("/api/notes/{filename}")
 async def delete_note(filename: str):
     base_filename = os.path.splitext(filename)[0]
-    deleted = False
     data = None
     try:
         data, _, _ = NOTES_STORE.load_note(base_filename)
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to load note %s: %s", base_filename, exc, exc_info=True)
         data = None
-    file_id = (data or {}).get('appwrite_file_id') if data else None
+    file_id = data.get('appwrite_file_id') if data else None
     audio_path = os.path.join(config.VOICE_NOTES_DIR, filename)
+    note_existed = bool(data) or os.path.exists(audio_path) or bool(file_id)
+
+    local_deleted = True
+    remote_deleted = True
+    store_deleted = True
+    errors: list[str] = []
+
     if os.path.exists(audio_path):
         try:
             os.remove(audio_path)
-            deleted = True
-        except Exception:
-            pass
+        except OSError as exc:
+            local_deleted = False
+            errors.append(f"Failed to delete audio file: {exc}")
+            logger.error("Failed to delete audio file %s: %s", audio_path, exc, exc_info=True)
+
     if file_id:
-        delete_audio_file(file_id)
+        try:
+            delete_audio_file(file_id)
+        except Exception as exc:
+            remote_deleted = False
+            errors.append(f"Failed to delete remote audio: {exc}")
+            logger.error("Failed to delete Appwrite file %s: %s", file_id, exc, exc_info=True)
+
     try:
         NOTES_STORE.delete_note(base_filename)
-        deleted = True
-    except Exception:
-        pass
-    return Response(status_code=200 if deleted else 404)
+    except Exception as exc:
+        store_deleted = False
+        errors.append(f"Failed to delete note metadata: {exc}")
+        logger.error("Failed to delete note metadata for %s: %s", base_filename, exc, exc_info=True)
+
+    if not note_existed:
+        return Response(status_code=404)
+
+    if not (local_deleted and remote_deleted and store_deleted):
+        message = "; ".join(errors) if errors else "Failed to delete note completely."
+        return Response(status_code=500, content=message)
+
+    return Response(status_code=200)
 
 
 @router.post("/api/notes/text")

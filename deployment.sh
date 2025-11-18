@@ -14,7 +14,7 @@ set -a
 source "$ENV_FILE"
 set +a
 
-APPWRITE_ADMIN_KEY="${APPWRITE_ADMIN_KEY:-$APPWRITE_API_KEY}"
+APPWRITE_ADMIN_KEY="${APPWRITE_ADMIN_KEY:-${APPWRITE_API_KEY:-}}"
 if [[ -z "${APPWRITE_ENDPOINT:-}" || -z "${APPWRITE_PROJECT_ID:-}" || -z "${APPWRITE_DATABASE_ID:-}" || -z "${APPWRITE_API_KEY:-}" ]]; then
   echo "[deploy] APPWRITE_* variables must be set in .env before running this script." >&2
   exit 1

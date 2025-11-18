@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import List, Optional
+import uuid
+from typing import Dict, List, Optional
 
 import config
 from store.api import AppwriteClient
@@ -67,17 +68,37 @@ def save_folders_registry(names: List[str]) -> None:
     if _use_appwrite_registry():
         client = _get_appwrite_client()
         collection = config.APPWRITE_FOLDERS_COLLECTION_ID
-        existing = client.list_documents(collection, limit=1000)
-        existing_ids = {doc['$id'] for doc in existing.get('documents', [])}
-        desired = set(trimmed)
+        id_by_name: Dict[str, str] = {}
+        existing_ids: set[str] = set()
+        cursor = None
+        page_size = 100
+        while True:
+            batch = client.list_documents(collection, cursor=cursor, limit=page_size)
+            docs = batch.get('documents', [])
+            if not docs:
+                break
+            for doc in docs:
+                existing_ids.add(doc['$id'])
+                data = doc.get('data') or doc
+                name = str(data.get('name') or '').strip()
+                if name and name.lower() not in id_by_name:
+                    id_by_name[name.lower()] = doc['$id']
+            cursor = docs[-1]['$id']
+            if len(docs) < page_size:
+                break
+
+        used_ids: set[str] = set()
         for name in trimmed:
-            doc_id = name
+            key = name.lower()
+            doc_id = id_by_name.get(key) or f"folder_{uuid.uuid4().hex}"
             payload = {'name': name}
             try:
                 client.update_document(collection, doc_id, payload)
             except Exception:
                 client.create_document(collection, doc_id, payload)
-        for doc_id in existing_ids - desired:
+            used_ids.add(doc_id)
+
+        for doc_id in existing_ids - used_ids:
             try:
                 client.delete_document(collection, doc_id)
             except Exception:

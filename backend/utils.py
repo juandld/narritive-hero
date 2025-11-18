@@ -4,7 +4,9 @@ import shutil
 import asyncio
 import wave
 import contextlib
+import logging
 from datetime import datetime
+
 from services import transcribe_and_save
 import usage_log as usage
 from note_store import build_note_payload, ensure_metadata_in_json as ensure_metadata_json, save_note_json
@@ -13,10 +15,19 @@ from langchain_core.messages import HumanMessage
 import config
 from store import get_notes_store
 
+logger = logging.getLogger(__name__)
+
 # Centralized paths; keep module vars for monkeypatching in tests
 VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
-NOTES_STORE = get_notes_store()
+_NOTES_STORE = None
+
+
+def _notes_store():
+    global _NOTES_STORE
+    if _NOTES_STORE is None:
+        _NOTES_STORE = get_notes_store()
+    return _NOTES_STORE
 
 async def on_startup():
     """On startup, create voice notes dir and backfill any missing transcriptions."""
@@ -59,9 +70,10 @@ async def on_startup():
                 try:
                     payload = build_note_payload(wav_file, base, "", include_length=False)
                     save_note_json(base, payload)
-                except Exception:
-                    pass
-                tasks.append(transcribe_and_save(wav_path))
+                except (OSError, ValueError, RuntimeError) as exc:
+                    logger.warning("Failed to create placeholder JSON for %s: %s", base, exc, exc_info=True)
+                finally:
+                    tasks.append(transcribe_and_save(wav_path))
             else:
                 json_path = os.path.join(TRANSCRIPTS_DIR, json_filename)
                 try:
@@ -70,18 +82,22 @@ async def on_startup():
                     if data.get('transcription') == 'Transcription failed.':
                         wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
                         tasks.append(transcribe_and_save(wav_path))
-                except Exception:
+                except FileNotFoundError:
                     wav_path = os.path.join(VOICE_NOTES_DIR, wav_file)
                     tasks.append(transcribe_and_save(wav_path))
+                except (json.JSONDecodeError, PermissionError) as exc:
+                    logger.error("JSON file %s is invalid or unreadable: %s", json_path, exc, exc_info=True)
+                except OSError as exc:
+                    logger.error("Unexpected error reading %s: %s", json_path, exc, exc_info=True)
     else:
         # Appwrite mode: no local folders to scan; rely on store listings.
-        for note in NOTES_STORE.list_notes():
+        store = _notes_store()
+        for note in store.list_notes():
             if (note.get("transcription") or "").strip() == "Transcription failed.":
                 filename = note.get("filename")
                 if filename:
                     wav_path = os.path.join(VOICE_NOTES_DIR, filename)
-                    if os.path.exists(wav_path):
-                        tasks.append(transcribe_and_save(wav_path))
+                    tasks.append(transcribe_and_save(wav_path))
 
     # Ensure metadata fields (language/topics/tags/folder/length/date) exist on all JSONs
     try:

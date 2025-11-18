@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from typing import Any, Dict, List, Optional
 
 import config
@@ -22,12 +23,15 @@ def _use_appwrite_registry() -> bool:
 
 
 _APPWRITE_CLIENT: Optional[AppwriteClient] = None
+_APPWRITE_CLIENT_LOCK = threading.Lock()
 
 
 def _get_appwrite_client() -> AppwriteClient:
     global _APPWRITE_CLIENT
     if _APPWRITE_CLIENT is None:
-        _APPWRITE_CLIENT = AppwriteClient()
+        with _APPWRITE_CLIENT_LOCK:
+            if _APPWRITE_CLIENT is None:
+                _APPWRITE_CLIENT = AppwriteClient()
     return _APPWRITE_CLIENT
 
 
@@ -170,8 +174,21 @@ def save_programs_registry(programs: List[Dict[str, Any]]) -> None:
         # Upsert new programs
         desired_keys = {p["key"] for p in programs}
         try:
-            existing_docs = client.list_documents(collection, limit=1000)
-            existing_ids = {doc["$id"] for doc in existing_docs.get("documents", [])}
+            cursor = None
+            existing_ids: set[str] = set()
+            page_limit = 100
+            while True:
+                batch = client.list_documents(collection, cursor=cursor, limit=page_limit)
+                docs = batch.get("documents", []) or []
+                for doc in docs:
+                    doc_id = doc.get("$id")
+                    if doc_id:
+                        existing_ids.add(doc_id)
+                if not docs or len(docs) < page_limit:
+                    break
+                cursor = docs[-1].get("$id")
+                if not cursor:
+                    break
         except Exception:
             existing_ids = set()
         for entry in programs:

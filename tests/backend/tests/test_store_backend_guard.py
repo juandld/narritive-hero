@@ -14,6 +14,12 @@ def test_note_store_allows_appwrite(monkeypatch, tmp_path):
     monkeypatch.setattr(cfg, "STORE_BACKEND", "appwrite", raising=False)
     monkeypatch.setattr(cfg, "VOICE_NOTES_DIR", str(voice_dir), raising=False)
     monkeypatch.setattr(cfg, "TRANSCRIPTS_DIR", str(trans_dir), raising=False)
+    monkeypatch.setattr(cfg, "APPWRITE_ENDPOINT", "http://localhost/v1", raising=False)
+    monkeypatch.setattr(cfg, "APPWRITE_PROJECT_ID", "test-project", raising=False)
+    monkeypatch.setattr(cfg, "APPWRITE_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(cfg, "APPWRITE_DATABASE_ID", "test-db", raising=False)
+    monkeypatch.setattr(cfg, "APPWRITE_NOTES_COLLECTION_ID", "test-notes", raising=False)
+    importlib.reload(ns)
 
     (voice_dir / "example.wav").write_bytes(b"")
     ns.save_note_json("example", {"filename": "example.wav", "title": "T", "transcription": "Hello"})
@@ -28,11 +34,6 @@ def test_note_store_filesystem_still_functions(monkeypatch, tmp_path):
     import note_store as ns
 
     monkeypatch.setattr(cfg, "STORE_BACKEND", "filesystem", raising=False)
-    importlib.reload(ns)
-
-    base = "sample"
-    payload = {"filename": "sample.wav", "title": "Test", "transcription": "Hello"}
-
     voice_dir = tmp_path / "voice_notes"
     trans_dir = tmp_path / "transcriptions"
     voice_dir.mkdir()
@@ -40,6 +41,10 @@ def test_note_store_filesystem_still_functions(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cfg, "VOICE_NOTES_DIR", str(voice_dir), raising=False)
     monkeypatch.setattr(cfg, "TRANSCRIPTS_DIR", str(trans_dir), raising=False)
+    importlib.reload(ns)
+
+    base = "sample"
+    payload = {"filename": "sample.wav", "title": "Test", "transcription": "Hello"}
 
     (voice_dir / "sample.wav").write_bytes(b"")
     ns.save_note_json(base, payload)
@@ -65,5 +70,8 @@ def test_store_factory_appwrite_not_ready(monkeypatch):
     from store import get_notes_store
 
     monkeypatch.setattr(config, "STORE_BACKEND", "appwrite", raising=False)
+    monkeypatch.setattr(config, "APPWRITE_ENDPOINT", "", raising=False)
+    monkeypatch.setattr(config, "APPWRITE_PROJECT_ID", "", raising=False)
+    monkeypatch.setattr(config, "APPWRITE_API_KEY", "", raising=False)
     with pytest.raises(RuntimeError, match="Appwrite endpoint"):
         get_notes_store(force_refresh=True)

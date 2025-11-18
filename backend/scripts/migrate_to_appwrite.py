@@ -76,7 +76,7 @@ def migrate_notes(client: AppwriteClient, dry_run: bool = False) -> None:
 
 def _jsonify(entry: dict, key: str) -> None:
     if key in entry:
-        entry[f"{key}_json"] = json.dumps(entry.get(key) or [])
+        entry[f"{key}_json"] = json.dumps(entry.get(key, []))
         entry.pop(key, None)
 
 

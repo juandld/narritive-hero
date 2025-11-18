@@ -29,6 +29,51 @@ VOICE_NOTES_DIR = config.VOICE_NOTES_DIR
 TRANSCRIPTS_DIR = config.TRANSCRIPTS_DIR
 NOTES_STORE = get_notes_store()
 
+_METADATA_EXISTING_KEYS = (
+    "content_type",
+    "original_format",
+    "transcoded",
+    "transcoded_from",
+    "sample_rate_hz",
+    "stored_mime",
+    "upload_extension",
+    "appwrite_file_id",
+    "created_ts",
+    "created_at",
+    "date",
+    "length_seconds",
+)
+
+
+def _build_metadata_from_filename_and_existing(
+    base_filename: str,
+    existing: Optional[dict],
+) -> dict:
+    audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
+    stored_mime = {
+        'm4a': 'audio/mp4',
+        'mp3': 'audio/mpeg',
+        'wav': 'audio/wav',
+        'ogg': 'audio/ogg',
+        'webm': 'audio/webm',
+    }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
+    metadata = {
+        "audio_format": audio_ext,
+        "stored_mime": stored_mime,
+    }
+    if audio_ext == 'm4a':
+        metadata.setdefault("sample_rate_hz", 44100)
+    elif audio_ext == 'wav':
+        metadata.setdefault("sample_rate_hz", 16000)
+    if isinstance(existing, dict):
+        for key in _METADATA_EXISTING_KEYS:
+            value = existing.get(key)
+            if value is not None:
+                metadata.setdefault(key, value)
+    metadata.setdefault("original_format", metadata.get("audio_format"))
+    metadata.setdefault("transcoded", False)
+    return metadata
+
 async def transcribe_and_save(wav_path):
     """Transcribes and titles an audio file, saving the results."""
     base_filename = os.path.basename(wav_path)
@@ -182,29 +227,9 @@ async def transcribe_and_save(wav_path):
                 title_text = "Title generation failed."
         print(f"Successfully generated title for {base_filename}.")
 
-        audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
-        stored_mime = {
-            'm4a': 'audio/mp4',
-            'mp3': 'audio/mpeg',
-            'wav': 'audio/wav',
-            'ogg': 'audio/ogg',
-            'webm': 'audio/webm',
-        }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
-        metadata = {
-            "audio_format": audio_ext,
-            "stored_mime": stored_mime,
-        }
-        if audio_ext == 'm4a':
-            metadata.setdefault("sample_rate_hz", 44100)
-        elif audio_ext == 'wav':
-            metadata.setdefault("sample_rate_hz", 16000)
+        metadata = _build_metadata_from_filename_and_existing(base_filename, existing)
         if isinstance(existing, dict):
             appwrite_file_id = existing.get("appwrite_file_id")
-            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension", "appwrite_file_id"):
-                if key in existing and existing[key] is not None:
-                    metadata.setdefault(key, existing[key])
-        metadata.setdefault("original_format", metadata.get("audio_format"))
-        metadata.setdefault("transcoded", False)
         payload = build_note_payload(base_filename, title_text, transcribed_text, metadata)
         if appwrite_file_id:
             payload["appwrite_file_id"] = appwrite_file_id
@@ -218,28 +243,7 @@ async def transcribe_and_save(wav_path):
 
     except Exception as e:
         print(f"Error during transcription/titling for {wav_path}: {e}")
-        audio_ext = os.path.splitext(base_filename)[1].lstrip('.').lower() or 'wav'
-        stored_mime = {
-            'm4a': 'audio/mp4',
-            'mp3': 'audio/mpeg',
-            'wav': 'audio/wav',
-            'ogg': 'audio/ogg',
-            'webm': 'audio/webm',
-        }.get(audio_ext, f"audio/{audio_ext}" if audio_ext else 'audio/wav')
-        metadata = {
-            "audio_format": audio_ext,
-            "stored_mime": stored_mime,
-        }
-        if audio_ext == 'm4a':
-            metadata.setdefault("sample_rate_hz", 44100)
-        elif audio_ext == 'wav':
-            metadata.setdefault("sample_rate_hz", 16000)
-        if isinstance(existing, dict):
-            for key in ("content_type", "original_format", "transcoded", "transcoded_from", "sample_rate_hz", "stored_mime", "upload_extension", "appwrite_file_id"):
-                if key in existing and existing[key] is not None:
-                    metadata.setdefault(key, existing[key])
-        metadata.setdefault("original_format", metadata.get("audio_format"))
-        metadata.setdefault("transcoded", False)
+        metadata = _build_metadata_from_filename_and_existing(base_filename, existing)
         payload = build_note_payload(base_filename, "Title generation failed.", "Transcription failed.", metadata)
         if appwrite_file_id:
             payload["appwrite_file_id"] = appwrite_file_id

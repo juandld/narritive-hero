@@ -21,9 +21,12 @@ class AppwriteClient:
             raise RuntimeError("Appwrite endpoint/project missing. Set APPWRITE_* env vars.")
         if not config.APPWRITE_API_KEY:
             raise RuntimeError("APPWRITE_API_KEY is required for backend operations.")
+        if not config.APPWRITE_DATABASE_ID:
+            raise RuntimeError("APPWRITE_DATABASE_ID is required for database operations.")
         self._base = config.APPWRITE_ENDPOINT.rstrip("/")
         self._project = config.APPWRITE_PROJECT_ID
         self._api_key = config.APPWRITE_API_KEY
+        self._database = config.APPWRITE_DATABASE_ID
 
     def _headers(self, content_type: Optional[str] = "json") -> Dict[str, str]:
         headers = {
@@ -35,7 +38,7 @@ class AppwriteClient:
         return headers
 
     def create_document(self, collection_id: str, document_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"{self._base}/databases/{config.APPWRITE_DATABASE_ID}/collections/{collection_id}/documents"
+        url = f"{self._base}/databases/{self._database}/collections/{collection_id}/documents"
         payload = {"documentId": document_id, "data": data}
         with httpx.Client(timeout=15) as client:
             resp = client.post(url, headers=self._headers(), json=payload)
@@ -43,7 +46,7 @@ class AppwriteClient:
             return resp.json()
 
     def update_document(self, collection_id: str, document_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"{self._base}/databases/{config.APPWRITE_DATABASE_ID}/collections/{collection_id}/documents/{document_id}"
+        url = f"{self._base}/databases/{self._database}/collections/{collection_id}/documents/{document_id}"
         payload = {"data": data}
         with httpx.Client(timeout=15) as client:
             resp = client.patch(url, headers=self._headers(), json=payload)
@@ -51,7 +54,7 @@ class AppwriteClient:
             return resp.json()
 
     def get_document(self, collection_id: str, document_id: str) -> Optional[Dict[str, Any]]:
-        url = f"{self._base}/databases/{config.APPWRITE_DATABASE_ID}/collections/{collection_id}/documents/{document_id}"
+        url = f"{self._base}/databases/{self._database}/collections/{collection_id}/documents/{document_id}"
         with httpx.Client(timeout=15) as client:
             resp = client.get(url, headers=self._headers())
             if resp.status_code == 404:
@@ -65,7 +68,7 @@ class AppwriteClient:
         limit: int = 100,
         cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
-        url = f"{self._base}/databases/{config.APPWRITE_DATABASE_ID}/collections/{collection_id}/documents"
+        url = f"{self._base}/databases/{self._database}/collections/{collection_id}/documents"
         params: Dict[str, Any] = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
@@ -76,7 +79,7 @@ class AppwriteClient:
             return resp.json()
 
     def delete_document(self, collection_id: str, document_id: str) -> None:
-        url = f"{self._base}/databases/{config.APPWRITE_DATABASE_ID}/collections/{collection_id}/documents/{document_id}"
+        url = f"{self._base}/databases/{self._database}/collections/{collection_id}/documents/{document_id}"
         with httpx.Client(timeout=15) as client:
             resp = client.delete(url, headers=self._headers())
             if resp.status_code not in (200, 204, 404):

@@ -1,3 +1,16 @@
+x-appwrite-common-env: &appwrite_common_env
+  _APP_ENV: ${APPWRITE_ENV:-production}
+  _APP_OPENSSL_KEY_V1: ${APPWRITE_OPENSSL_KEY_V1}
+  _APP_DOMAIN: ${APPWRITE_DOMAIN:-localhost}
+  _APP_DB_HOST: ${APPWRITE_DB_HOST:-mariadb}
+  _APP_DB_PORT: ${APPWRITE_DB_PORT:-3306}
+  _APP_DB_SCHEMA: ${APPWRITE_DB_SCHEMA:-appwrite}
+  _APP_DB_USER: ${APPWRITE_DB_USER:-root}
+  _APP_DB_PASS: ${APPWRITE_DB_PASSWORD}
+  _APP_DB_ROOT_PASS: ${APPWRITE_DB_PASSWORD}
+  _APP_REDIS_HOST: ${APPWRITE_REDIS_HOST:-redis}
+  _APP_REDIS_PORT: ${APPWRITE_REDIS_PORT:-6379}
+
 services:
   backend:
     build: ./backend
@@ -39,20 +52,10 @@ services:
     image: appwrite/appwrite:1.5.0
     restart: unless-stopped
     environment:
-      - _APP_ENV=development
-      - _APP_OPENSSL_KEY_V1=${APPWRITE_OPENSSL_KEY_V1:-changeme}
-      - _APP_DOMAIN=${APPWRITE_DOMAIN:-localhost}
-      - _APP_DOMAIN_TARGET=${APPWRITE_DOMAIN_TARGET:-localhost}
-      - _APP_STORAGE_LIMIT=2000000000
-      - _APP_SYSTEM_RESPONSE_FORMAT=${APPWRITE_RESPONSE_FORMAT:-1.5.0}
-      - _APP_DB_HOST=${APPWRITE_DB_HOST:-mariadb}
-      - _APP_DB_PORT=${APPWRITE_DB_PORT:-3306}
-      - _APP_DB_SCHEMA=${APPWRITE_DB_SCHEMA:-appwrite}
-      - _APP_DB_USER=${APPWRITE_DB_USER:-root}
-      - _APP_DB_PASS=${APPWRITE_DB_PASSWORD:-root}
-      - _APP_DB_ROOT_PASS=${APPWRITE_DB_PASSWORD:-root}
-      - _APP_REDIS_HOST=${APPWRITE_REDIS_HOST:-redis}
-      - _APP_REDIS_PORT=${APPWRITE_REDIS_PORT:-6379}
+      <<: *appwrite_common_env
+      _APP_DOMAIN_TARGET: ${APPWRITE_DOMAIN_TARGET:-localhost}
+      _APP_STORAGE_LIMIT: 2000000000
+      _APP_SYSTEM_RESPONSE_FORMAT: ${APPWRITE_RESPONSE_FORMAT:-1.5.0}
     ports:
       - "${APPWRITE_PORT:-8080}:80"
     volumes:
@@ -69,17 +72,7 @@ services:
     entrypoint: worker-databases
     restart: unless-stopped
     environment:
-      - _APP_ENV=development
-      - _APP_OPENSSL_KEY_V1=${APPWRITE_OPENSSL_KEY_V1:-changeme}
-      - _APP_DOMAIN=${APPWRITE_DOMAIN:-localhost}
-      - _APP_DB_HOST=${APPWRITE_DB_HOST:-mariadb}
-      - _APP_DB_PORT=${APPWRITE_DB_PORT:-3306}
-      - _APP_DB_SCHEMA=${APPWRITE_DB_SCHEMA:-appwrite}
-      - _APP_DB_USER=${APPWRITE_DB_USER:-root}
-      - _APP_DB_PASS=${APPWRITE_DB_PASSWORD:-root}
-      - _APP_DB_ROOT_PASS=${APPWRITE_DB_PASSWORD:-root}
-      - _APP_REDIS_HOST=${APPWRITE_REDIS_HOST:-redis}
-      - _APP_REDIS_PORT=${APPWRITE_REDIS_PORT:-6379}
+      <<: *appwrite_common_env
     depends_on:
       - mariadb
       - redis
@@ -88,7 +81,7 @@ services:
     image: mariadb:11
     restart: unless-stopped
     environment:
-      - MYSQL_ROOT_PASSWORD=${APPWRITE_DB_PASSWORD:-root}
+      MYSQL_ROOT_PASSWORD: ${APPWRITE_DB_PASSWORD}
     volumes:
       - appwrite-mariadb:/var/lib/mysql
 
